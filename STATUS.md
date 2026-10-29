@@ -29,7 +29,7 @@ cmd/testserver/ throwaway local HTTP target for dev testing only, not part of th
 internal/
   template/     raw HTTP request parsing, §marker§ detection/injection, Build() -> *http.Request
   payload/      Generator interface; Wordlist implemented; numeric/brute-force/processing NOT YET
-  attack/       attack-mode orchestration; Sniper implemented; Battering ram/Pitchfork/Cluster bomb NOT YET
+  attack/       attack-mode orchestration; Sniper, Battering ram, Pitchfork, Cluster bomb all DONE
   engine/       worker pool, shared http.Client, rate limiter+jitter, Result streaming — DONE
   config/       save/load attack configs — NOT BUILT YET
   server/       web UI backend (HTTP+WS) — NOT BUILT YET
@@ -68,36 +68,88 @@ log / chat history if the "why" behind any of this needs revisiting.
 
 Full test suite passes: `go test -race ./...`
 
+- [x] `internal/attack` — all four attack modes implemented, each its own
+      file following the `Jobs(ctx, cfg, buffer) <-chan engine.Job` shape
+      `sniper.go` established:
+      - `battering_ram.go` — one generator, same value broadcast into
+        every marker on each iteration. `BatteringRamJobs` /
+        `BatteringRamConfig`. `TotalJobs()` = `Generator.Len()`.
+      - `pitchfork.go` — one generator per marker (`Generators []payload.Generator`,
+        same order as `Template.Markers`), walked in lockstep; stops the
+        instant the shortest generator is exhausted, matching Burp's own
+        Pitchfork behavior (longer generators' remaining values are never
+        used). `PitchforkJobs` / `PitchforkConfig`. `TotalJobs()` = length
+        of the shortest generator. A `len(Generators) != len(Markers)`
+        mismatch is treated as a setup error — `Jobs` sends nothing rather
+        than guessing.
+      - `cluster_bomb.go` — one generator per marker, full combinatorial
+        product (odometer-style nested iteration: the *last* marker's
+        generator varies fastest, earlier ones roll over and `Reset()`
+        once everything to their right has cycled — same nested-`Reset()`
+        pattern Sniper's outer loop already uses, generalized to N
+        generators instead of markers-vs-one). `ClusterBombJobs` /
+        `ClusterBombConfig`. `TotalJobs()` = product of every generator's
+        `Len()`; an empty generator anywhere correctly produces zero jobs.
+      All three have `httptest`-backed tests verifying the *exact* set of
+      query-string combinations produced (same style as
+      `sniper_test.go`), plus a mismatch/empty-generator edge case each
+      for Pitchfork and Cluster bomb. Full suite (`go test -race ./...`)
+      passes, attack package included.
+      **Not wired into `cmd/cli` yet** — the CLI still only demos Sniper
+      against `cmd/testserver`'s single-field `/login` endpoint, since
+      exercising Pitchfork/Cluster bomb meaningfully needs a target with
+      ≥2 independent fields (e.g. username+password), which testserver
+      doesn't have yet. The attack-mode tests above are the verification
+      for this step; wiring a multi-field CLI demo is optional follow-up,
+      not a blocker for the next step below.
+
 **Known environment quirk (dev sandbox only, shouldn't apply on your
 machine):** `localhost` didn't resolve in this sandbox; had to use
 `127.0.0.1` in the CLI's hardcoded template/target. Not a code issue.
 
 ## Next step
 
-Layer in the remaining attack modes, following the exact same
-`Jobs(ctx, cfg, buffer) <-chan engine.Job` shape `internal/attack/sniper.go`
-already establishes:
+1. **(Optional, quick)** Give `cmd/testserver` a second query field (e.g.
+   `username`) alongside `password`, and add a CLI demo (or a short-lived
+   `main.go` variant) exercising Pitchfork and/or Cluster bomb end to end
+   the same way Sniper already is — proves the new modes against a live
+   server, not just `httptest` unit tests.
+2. **Payload processing rule chains** — URL-encode / base64 / prefix-suffix
+   / case transforms applied to a generator's output before it's injected.
+   Likely shape: a `Generator` *decorator* that wraps another `Generator`
+   and transforms each `Next()` value, so it composes with every existing
+   attack mode for free rather than needing attack-mode-specific code.
+3. **More generators**: numeric-range, brute-force (character-set ×
+   length). Same `Generator` interface as `Wordlist`, so no changes needed
+   above `internal/payload`.
+4. **Match/extract rules** on `engine.Result` — flagging interesting
+   responses (status/length/regex match) and pulling values out of a
+   response body for use in later requests (needed for multi-stage auth
+   flows, CSRF tokens, etc.).
+5. **Web UI**: `internal/server` (HTTP+WS backend) + `web/` (static
+   frontend) consuming the `engine.Result` stream over WebSockets instead
+   of the CLI's console printer. This is the last item in the original
+   plan and the biggest single chunk of remaining work — expect it to need
+   its own multi-session arc, not a single sitting.
 
-1. **Battering ram** — same payload value inserted into *all* markers
-   simultaneously (one generator, one value per iteration, broadcast to
-   every marker index).
-2. **Pitchfork** — multiple payload sets (one `Generator` per marker)
-   iterated in parallel/lockstep; stops at the shortest generator (Burp's
-   behavior) — confirm this against Burp docs/behavior when we get there.
-3. **Cluster bomb** — multiple payload sets, full combinatorial product
-   across all markers (nested iteration with `Reset()` on inner
-   generators, same pattern Sniper already uses for its outer loop).
+## How to resume this project (e.g. if a session runs out of budget)
 
-After that, in the order originally planned: payload processing rule
-chains (URL-encode/base64/prefix-suffix/case), numeric-range and
-brute-force generators, match/extract rules on the engine's `Result`, then
-the web UI (`internal/server` + `web/`) consuming the result stream over
-WebSockets instead of the CLI's console printer.
+If you're reading this because a previous session stopped partway (ran out
+of its token/usage budget, got interrupted, etc.), there's no special
+recovery needed — nothing was left half-written. Every change so far has
+landed as a complete, tested commit; `go test -race ./...` passing is the
+checkpoint. Just:
 
-## How to resume this project in a new session
+1. Open/clone this repo (`git log --oneline` to see what's actually landed
+   — this file is a summary, the commits are ground truth).
+2. Tell Claude: "Continue the Burp Intruder clone project — read
+   STATUS.md and pick up from Next step."
+3. Claude should re-run `go build ./... && go test -race ./...` first to
+   confirm the working tree matches what this file claims, *then* start
+   on the next unchecked item above — not re-derive the architecture or
+   redo finished work from scratch.
 
-1. Clone this repo.
-2. Tell Claude: "Continue the Burp Intruder clone project — read STATUS.md
-   and pick up from Next step."
-3. Point Claude at this file; it has everything needed to continue without
-   re-deriving the architecture from scratch.
+This file is kept up to date after every meaningful chunk of work
+specifically so that handoff works — update it (Done list, Next step,
+this section if the resume story changes) before stopping, not just when
+a session happens to end cleanly.
