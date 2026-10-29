@@ -28,7 +28,7 @@ cmd/cli/        headless entry point — exists now, runs one hardcoded Sniper a
 cmd/testserver/ throwaway local HTTP target for dev testing only, not part of the tool
 internal/
   template/     raw HTTP request parsing, §marker§ detection/injection, Build() -> *http.Request
-  payload/      Generator interface; Wordlist + processing-rule Chain done; numeric/brute-force NOT YET
+  payload/      Generator interface; Wordlist, NumericRange, BruteForce, processing-rule Chain — all DONE
   attack/       attack-mode orchestration; Sniper, Battering ram, Pitchfork, Cluster bomb all DONE
   engine/       worker pool, shared http.Client, rate limiter+jitter, Result streaming — DONE
   config/       save/load attack configs — NOT BUILT YET
@@ -126,22 +126,48 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       no-rules passthrough, and `Reset`/`Len` delegation. Full suite
       passes under `-race`.
 
+- [x] `internal/payload` — two more generators, both satisfying the plain
+      `Generator` interface so they work everywhere `Wordlist` does
+      (every attack mode, and as a `Chain` base):
+      - `numeric_range.go` — `NumericRange{From, To, Step, MinDigits}` /
+        `NewNumericRange(from, to, step, minDigits)`. Burp's "Numbers"
+        payload type: an inclusive arithmetic sequence, with optional
+        zero-padding (padding the digits, not the sign — `-2` pads to
+        `-002`, not `00-2`). `Len()` is computed directly from the bounds
+        (no walking the sequence), so it's correct before the first
+        `Next()`. `Step <= 0` or `From > To` is treated as an empty range
+        (`Len() == 0`, `Next()` always `false`) rather than an error or a
+        panic — consistent with how `internal/attack` already treats an
+        empty generator (zero jobs, not a crash).
+      - `brute_force.go` — `BruteForce{Charset, MinLen, MaxLen}` /
+        `NewBruteForce(charset, minLen, maxLen)`. Burp's "Brute forcer"
+        payload type: every string drawable from `Charset`, shortest
+        length first, each length's combinations in lexicographic order
+        (odometer-style, same nested-increment idea `cluster_bomb.go`
+        uses for combining markers, applied here to combining character
+        positions instead). `Len()` = Σ `len(Charset)^L` for `L` from
+        `MinLen` to `MaxLen`. An empty charset or `MaxLen < MinLen` or
+        `MinLen < 1` is an empty generator, same convention as
+        `NumericRange`.
+      Tests cover basic sequences, step, zero-padding (including
+      negatives), invalid-config-is-empty-not-a-crash, `Reset`, and that
+      each composes with `Chain` (e.g. `NewChain(NewNumericRange(...),
+      PrefixRule{...})`) exactly like `Wordlist` does. Full suite passes
+      under `-race`.
+
 ## Next step
 
 1. **(Optional, quick)** Give `cmd/testserver` a second query field (e.g.
    `username`) alongside `password`, and add a CLI demo (or a short-lived
-   `main.go` variant) exercising Pitchfork and/or Cluster bomb — and now
-   also a `Chain`-wrapped generator — end to end the same way Sniper
-   already is. Proves things against a live server, not just unit tests.
-2. **More generators**: numeric-range, brute-force (character-set ×
-   length). Same `Generator` interface as `Wordlist`, so no changes needed
-   to `internal/attack` or `internal/payload/chain.go` — a `Chain` can
-   wrap these too, for free, same as it wraps `Wordlist` today.
-3. **Match/extract rules** on `engine.Result` — flagging interesting
+   `main.go` variant) exercising Pitchfork and/or Cluster bomb, a
+   `NumericRange`/`BruteForce` generator, and a `Chain`-wrapped generator —
+   end to end the same way Sniper already is. Proves things against a live
+   server, not just unit tests. Still optional/follow-up, not a blocker.
+2. **Match/extract rules** on `engine.Result` — flagging interesting
    responses (status/length/regex match) and pulling values out of a
    response body for use in later requests (needed for multi-stage auth
-   flows, CSRF tokens, etc.).
-4. **Web UI**: `internal/server` (HTTP+WS backend) + `web/` (static
+   flows, CSRF tokens, etc.). This is the next real (non-optional) step.
+3. **Web UI**: `internal/server` (HTTP+WS backend) + `web/` (static
    frontend) consuming the `engine.Result` stream over WebSockets instead
    of the CLI's console printer. This is the last item in the original
    plan and the biggest single chunk of remaining work — expect it to need
