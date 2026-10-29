@@ -31,6 +31,7 @@ internal/
   payload/      Generator interface; Wordlist, NumericRange, BruteForce, processing-rule Chain — all DONE
   attack/       attack-mode orchestration; Sniper, Battering ram, Pitchfork, Cluster bomb all DONE
   engine/       worker pool, shared http.Client, rate limiter+jitter, Result streaming — DONE
+  match/        match/filter rules on engine.Result + value extraction — DONE
   config/       save/load attack configs — NOT BUILT YET
   server/       web UI backend (HTTP+WS) — NOT BUILT YET
 web/            static frontend — NOT BUILT YET
@@ -155,23 +156,68 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       PrefixRule{...})`) exactly like `Wordlist` does. Full suite passes
       under `-race`.
 
+- [x] `internal/match` — match/filter rules on `engine.Result`, plus value
+      extraction, kept as two separate concerns (a Matcher answers
+      yes/no, an Extractor answers "here's the string"):
+      - `match.go` — `Matcher` interface (`Match(r engine.Result) bool`).
+        `StatusMatcher`/`LengthMatcher` compare against a `CompareOp`
+        (`Equal`/`NotEqual`/`LessThan`/`GreaterThan`/`LessOrEqual`/
+        `GreaterOrEqual`, Burp's own six); `BodyRegexMatcher` /
+        `HeaderRegexMatcher` match on a compiled `*regexp.Regexp` against
+        the body or a named header; `ErrorMatcher` flags a Result whose
+        *request* failed (timeout, connection refused) rather than
+        completing with a status. `And`/`Or`/`Not` combine any of the
+        above (`Or{}` matches nothing, same as Burp's "no conditions
+        enabled"). A Result with `Err != nil` never matches
+        Status/Length/body/header matchers — there's no status/body to
+        compare against a failed request.
+      - `extract.go` — `Extractor` interface
+        (`Extract(r engine.Result) (string, bool)`). `BodyRegexExtractor`
+        / `HeaderRegexExtractor` return the first capture group's text if
+        the regex has one, else the whole match — mirrors Burp's
+        "extract grammar". This is the primitive multi-stage flows
+        (grab a CSRF token or session cookie from one response, feed it
+        into the next request) will build on; the actual chaining —
+        feeding an extracted value back into a later `Template.Build` —
+        is NOT built yet, this is just the extraction primitive.
+      - `flag.go` — `Flag(ctx, results <-chan engine.Result, m Matcher)
+        <-chan Flagged` wraps a `Pool.Run` result stream, tagging every
+        Result with whether it matched `m` without dropping or
+        reordering anything (a "flag column", not a filter — same idea
+        as a Burp Intruder results table). Closes on context
+        cancellation or the input channel closing, same contract as
+        `Pool.Run` itself. **Not wired into `cmd/cli` yet** — the CLI
+        still prints the raw, untagged result stream.
+      Tests cover every matcher (incl. the errored-Result-never-matches
+      rule), every combinator, both extractors (capture group vs. whole
+      match vs. no match vs. errored Result), and `Flag`'s
+      ordering/tagging and cancellation behavior. Full suite passes
+      under `-race`.
+
 ## Next step
 
 1. **(Optional, quick)** Give `cmd/testserver` a second query field (e.g.
    `username`) alongside `password`, and add a CLI demo (or a short-lived
    `main.go` variant) exercising Pitchfork and/or Cluster bomb, a
-   `NumericRange`/`BruteForce` generator, and a `Chain`-wrapped generator —
-   end to end the same way Sniper already is. Proves things against a live
-   server, not just unit tests. Still optional/follow-up, not a blocker.
-2. **Match/extract rules** on `engine.Result` — flagging interesting
-   responses (status/length/regex match) and pulling values out of a
-   response body for use in later requests (needed for multi-stage auth
-   flows, CSRF tokens, etc.). This is the next real (non-optional) step.
-3. **Web UI**: `internal/server` (HTTP+WS backend) + `web/` (static
-   frontend) consuming the `engine.Result` stream over WebSockets instead
-   of the CLI's console printer. This is the last item in the original
-   plan and the biggest single chunk of remaining work — expect it to need
-   its own multi-session arc, not a single sitting.
+   `NumericRange`/`BruteForce` generator, a `Chain`-wrapped generator, and
+   `match.Flag` with a `StatusMatcher` — end to end the same way Sniper
+   already is. Proves things against a live server, not just unit tests.
+   Still optional/follow-up, not a blocker.
+2. **Wire `match.Flag` into `cmd/cli`'s printer** so a run actually shows
+   which rows matched (e.g. highlight/mark the row instead of just
+   printing status/length/time) — small, makes `internal/match` visibly
+   useful before the web UI exists to do it properly.
+3. **Multi-stage chaining**: use `match.Extractor` to pull a value out of
+   one response (a CSRF token, a session cookie) and feed it into a later
+   request in the same run. Not designed yet — needs its own look at
+   whether this is a new attack-mode concept, a `Template` feature, or
+   something orchestrated one level up from both. This is the next real
+   (non-optional, meatier) step.
+4. **Web UI**: `internal/server` (HTTP+WS backend) + `web/` (static
+   frontend) consuming the `engine.Result`/`match.Flagged` stream over
+   WebSockets instead of the CLI's console printer. This is the last item
+   in the original plan and the biggest single chunk of remaining work —
+   expect it to need its own multi-session arc, not a single sitting.
 
 ## How to resume this project (e.g. if a session runs out of budget)
 
