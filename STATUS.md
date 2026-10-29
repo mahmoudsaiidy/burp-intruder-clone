@@ -193,6 +193,12 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       match vs. no match vs. errored Result), and `Flag`'s
       ordering/tagging and cancellation behavior. Full suite passes
       under `-race`.
+- [x] `cmd/cli` wired to `match.Flag` — the Sniper demo now flags
+      `StatusMatcher{Equal, 200}` hits with a `HIT` column (`***` on a
+      match) instead of printing the raw, untagged result stream.
+      Verified live against `cmd/testserver`: `hunter2` → `200` is the
+      only flagged row, in-order, all 6 rows still printed (flagging
+      doesn't filter).
 
 ## Next step
 
@@ -203,17 +209,13 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
    `match.Flag` with a `StatusMatcher` — end to end the same way Sniper
    already is. Proves things against a live server, not just unit tests.
    Still optional/follow-up, not a blocker.
-2. **Wire `match.Flag` into `cmd/cli`'s printer** so a run actually shows
-   which rows matched (e.g. highlight/mark the row instead of just
-   printing status/length/time) — small, makes `internal/match` visibly
-   useful before the web UI exists to do it properly.
-3. **Multi-stage chaining**: use `match.Extractor` to pull a value out of
+2. **Multi-stage chaining**: use `match.Extractor` to pull a value out of
    one response (a CSRF token, a session cookie) and feed it into a later
    request in the same run. Not designed yet — needs its own look at
    whether this is a new attack-mode concept, a `Template` feature, or
    something orchestrated one level up from both. This is the next real
    (non-optional, meatier) step.
-4. **Web UI**: `internal/server` (HTTP+WS backend) + `web/` (static
+3. **Web UI**: `internal/server` (HTTP+WS backend) + `web/` (static
    frontend) consuming the `engine.Result`/`match.Flagged` stream over
    WebSockets instead of the CLI's console printer. This is the last item
    in the original plan and the biggest single chunk of remaining work —
