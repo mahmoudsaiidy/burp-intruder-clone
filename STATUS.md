@@ -28,7 +28,7 @@ cmd/cli/        headless entry point — exists now, runs one hardcoded Sniper a
 cmd/testserver/ throwaway local HTTP target for dev testing only, not part of the tool
 internal/
   template/     raw HTTP request parsing, §marker§ detection/injection, Build() -> *http.Request
-  payload/      Generator interface; Wordlist implemented; numeric/brute-force/processing NOT YET
+  payload/      Generator interface; Wordlist + processing-rule Chain done; numeric/brute-force NOT YET
   attack/       attack-mode orchestration; Sniper, Battering ram, Pitchfork, Cluster bomb all DONE
   engine/       worker pool, shared http.Client, rate limiter+jitter, Result streaming — DONE
   config/       save/load attack configs — NOT BUILT YET
@@ -107,26 +107,41 @@ Full test suite passes: `go test -race ./...`
 machine):** `localhost` didn't resolve in this sandbox; had to use
 `127.0.0.1` in the CLI's hardcoded template/target. Not a code issue.
 
+- [x] `internal/payload` — payload processing rule chains, done as a
+      `Generator` *decorator* rather than attack-mode-specific code:
+      - `rules.go` — `Rule` interface (`Apply(value string) string`) plus
+        six concrete rules: `URLEncodeRule`, `Base64EncodeRule`,
+        `PrefixRule`, `SuffixRule`, `UpperCaseRule`, `LowerCaseRule`.
+      - `chain.go` — `Chain` wraps a base `Generator` and a `[]Rule`,
+        applying them in order to each value `Next()` produces (each rule
+        sees the *previous* rule's output, so rule order is meaningful —
+        e.g. `Prefix` then `Base64Encode` encodes the prefix too, the
+        reverse doesn't). `Chain` itself implements `Generator`
+        (`Reset`/`Len` delegate straight to `Base`, since rules transform
+        values but never add/drop/reorder them), so it composes with
+        Sniper, Battering ram, Pitchfork and Cluster bomb with zero
+        changes to `internal/attack` — any `Generator` a `*Chain` wraps,
+        and a `*Chain` itself, works anywhere a `Generator` is accepted.
+      Tests cover each rule in isolation, rule-order sensitivity, a
+      no-rules passthrough, and `Reset`/`Len` delegation. Full suite
+      passes under `-race`.
+
 ## Next step
 
 1. **(Optional, quick)** Give `cmd/testserver` a second query field (e.g.
    `username`) alongside `password`, and add a CLI demo (or a short-lived
-   `main.go` variant) exercising Pitchfork and/or Cluster bomb end to end
-   the same way Sniper already is — proves the new modes against a live
-   server, not just `httptest` unit tests.
-2. **Payload processing rule chains** — URL-encode / base64 / prefix-suffix
-   / case transforms applied to a generator's output before it's injected.
-   Likely shape: a `Generator` *decorator* that wraps another `Generator`
-   and transforms each `Next()` value, so it composes with every existing
-   attack mode for free rather than needing attack-mode-specific code.
-3. **More generators**: numeric-range, brute-force (character-set ×
+   `main.go` variant) exercising Pitchfork and/or Cluster bomb — and now
+   also a `Chain`-wrapped generator — end to end the same way Sniper
+   already is. Proves things against a live server, not just unit tests.
+2. **More generators**: numeric-range, brute-force (character-set ×
    length). Same `Generator` interface as `Wordlist`, so no changes needed
-   above `internal/payload`.
-4. **Match/extract rules** on `engine.Result` — flagging interesting
+   to `internal/attack` or `internal/payload/chain.go` — a `Chain` can
+   wrap these too, for free, same as it wraps `Wordlist` today.
+3. **Match/extract rules** on `engine.Result` — flagging interesting
    responses (status/length/regex match) and pulling values out of a
    response body for use in later requests (needed for multi-stage auth
    flows, CSRF tokens, etc.).
-5. **Web UI**: `internal/server` (HTTP+WS backend) + `web/` (static
+4. **Web UI**: `internal/server` (HTTP+WS backend) + `web/` (static
    frontend) consuming the `engine.Result` stream over WebSockets instead
    of the CLI's console printer. This is the last item in the original
    plan and the biggest single chunk of remaining work — expect it to need
