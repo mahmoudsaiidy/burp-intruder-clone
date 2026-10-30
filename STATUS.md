@@ -200,26 +200,76 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       only flagged row, in-order, all 6 rows still printed (flagging
       doesn't filter).
 
+- [x] **Multi-stage chaining** — `internal/chain`, new package, orchestrated
+      one level above both `internal/template` and `internal/attack` (the
+      question STATUS.md left open last session — now settled): a chain
+      `Stage` is just another request+extract step built from the same
+      primitives those two packages already expose (`template.Template` to
+      build it, `match.Extractor` to read it), and what `Resolve` produces
+      is plain raw-text that the attack's own §marker§ parsing hasn't seen
+      yet. So no changes were needed in `internal/attack` or
+      `internal/template` to support this — an attack mode's `Jobs()` runs
+      against a chain-resolved template exactly like any other template.
+      - `Stage{Name, Raw, MarkerValues, Target, Extractor, Placeholder}` —
+        one prerequisite request. `Placeholder` is a literal substring
+        (e.g. `"{{csrf}}"`, deliberately *not* §-delimited, so it can never
+        be confused with — or collide with — an attack's own §payload§
+        markers) that gets swapped for this stage's extracted value in
+        every later stage's `Raw` and in the final attack template.
+      - `Resolve(ctx, client, stages, attackRaw) (resolvedAttackRaw string,
+        extracted map[string]string, err error)` — runs stages
+        *sequentially* (never concurrently: a later stage's own request
+        text, e.g. a CSRF-token fetch that must present an earlier stage's
+        session cookie, may depend on an earlier stage's value), firing
+        each one with a small unexported `execute()` helper that returns
+        the same `engine.Result` shape attack results use — so a Stage's
+        `Extractor` is exactly the `match.Extractor` the main attack
+        already has, no separate "setup response" type. A stage that fails
+        to build, fails to fire, or whose `Extractor` finds nothing stops
+        the whole chain immediately with an error naming that stage —
+        same "setup problem, not a per-request condition" convention
+        `internal/attack` already uses for template-build failures.
+        `extracted` comes back keyed by `Stage.Name` (every stage's value,
+        whether or not it had a `Placeholder`) for logging/debugging.
+      - Duplicate stage names and two stages sharing one `Placeholder` are
+        both rejected explicitly, rather than silently letting one
+        overwrite the other.
+      Tests: unit coverage for every error path above, plus two
+      `httptest`-backed integration tests — one single-stage (CSRF token →
+      main attack header), one genuinely multi-stage (a session stage's
+      extracted value is asserted, server-side, to actually arrive on the
+      *next* stage's own outgoing request, proving values really flow
+      forward through the chain and not just into the final attack text) —
+      and a check that the attack's own §marker§ survives chain resolution
+      completely untouched. Full suite (`go test -race ./...`) passes,
+      chain package included.
+      **Not wired into `cmd/cli` yet** — `internal/chain` is a standalone,
+      fully tested package; hooking a chain into the CLI's demo (or a web
+      UI run) is follow-up wiring, not a design question anymore.
+
 ## Next step
 
 1. **(Optional, quick)** Give `cmd/testserver` a second query field (e.g.
    `username`) alongside `password`, and add a CLI demo (or a short-lived
    `main.go` variant) exercising Pitchfork and/or Cluster bomb, a
-   `NumericRange`/`BruteForce` generator, a `Chain`-wrapped generator, and
-   `match.Flag` with a `StatusMatcher` — end to end the same way Sniper
-   already is. Proves things against a live server, not just unit tests.
-   Still optional/follow-up, not a blocker.
-2. **Multi-stage chaining**: use `match.Extractor` to pull a value out of
-   one response (a CSRF token, a session cookie) and feed it into a later
-   request in the same run. Not designed yet — needs its own look at
-   whether this is a new attack-mode concept, a `Template` feature, or
-   something orchestrated one level up from both. This is the next real
-   (non-optional, meatier) step.
+   `NumericRange`/`BruteForce` generator, a `Chain`-wrapped generator
+   (the `internal/payload` rule-chain one), and `match.Flag` with a
+   `StatusMatcher` — end to end the same way Sniper already is. Proves
+   things against a live server, not just unit tests. Still
+   optional/follow-up, not a blocker.
+2. **(Optional, quick)** Wire `internal/chain.Resolve` into `cmd/cli` (or a
+   short-lived demo variant): a `/csrf`-style endpoint on
+   `cmd/testserver` that `cmd/testserver`'s `/login` handler requires a
+   valid token from, one `chain.Stage` fetching it, then a normal Sniper
+   run against the chain-resolved template. `internal/chain`'s own tests
+   already prove the mechanism works; this would just prove it live,
+   the same spirit as item 1.
 3. **Web UI**: `internal/server` (HTTP+WS backend) + `web/` (static
    frontend) consuming the `engine.Result`/`match.Flagged` stream over
    WebSockets instead of the CLI's console printer. This is the last item
    in the original plan and the biggest single chunk of remaining work —
-   expect it to need its own multi-session arc, not a single sitting.
+   expect it to need its own multi-session arc, not a single sitting. With
+   chaining now done, this is the next non-optional step.
 
 ## How to resume this project (e.g. if a session runs out of budget)
 
