@@ -8,9 +8,11 @@ results workflow, as a standalone Go core with a UI-agnostic design.
 
 ## Status
 
-Core engine, all four attack modes, and payload/match tooling are built,
-tested, and verified end to end against a local test server. Multi-stage
-request chaining and the web UI are not built yet. See
+Core engine, all four attack modes, payload/match tooling, and multi-stage
+request chaining are built and tested. A first slice of the web UI is up
+too — an HTTP+WS server streaming a live demo attack to a browser page —
+though it still only runs one hardcoded attack, the same as the CLI; a real
+"configure your own attack" flow is the next non-optional step. See
 [`STATUS.md`](./STATUS.md) for the detailed, up-to-date breakdown and the
 resume point for ongoing work.
 
@@ -50,6 +52,18 @@ Go code (no GUI yet).
 - **Request templates** — `internal/template`: parses a raw HTTP request,
   finds `§marker§` positions, and rebuilds a concrete `*http.Request` for
   a given payload set.
+- **Multi-stage chaining** — `internal/chain`: fires one or more
+  prerequisite requests before the main attack (a login, a token fetch),
+  pulls a value out of each response with a `match.Extractor`, and
+  substitutes it into later stages' requests and into the final attack
+  template — e.g. grab a CSRF token or session cookie and carry it into
+  every attack request.
+- **Web UI** — `internal/server` + `web/`: an HTTP+WS backend (hand-rolled
+  stdlib WebSocket layer, no third-party dependency) streaming
+  `engine.Result`/`match.Flagged` to a browser page in real time, served
+  by `cmd/server`. Currently runs one hardcoded Sniper demo per connection
+  against its own disposable local target — not yet a general front end
+  for arbitrary attacks (see Status above).
 
 ## Requirements
 
@@ -87,34 +101,44 @@ HIT    STATUS  PAYLOAD          LENGTH   TIME      ERROR
 ```
 
 `cmd/cli` currently runs one hardcoded Sniper attack; it's a proof that
-the engine works, not yet a general-purpose front end — that's what the
-planned web UI (`internal/server` + `web/`) is for.
+the engine works, not yet a general-purpose front end.
+
+You can also run the same kind of demo in a browser:
+
+```sh
+go run ./cmd/server
+# open http://localhost:8080 and click "Run demo attack"
+```
+
+`cmd/server` is self-contained — it starts its own disposable local target
+per run, so there's no second process to start first. It serves the page
+from `web/` and streams results to it live over a WebSocket at `/ws`.
 
 ## Project layout
 
 ```
-cmd/server/     entry point: HTTP+WS server, wires everything (not built yet)
+cmd/server/     entry point: HTTP+WS server, serves web/ and the /ws demo attack
 cmd/cli/        headless entry point — runs one hardcoded Sniper attack
-cmd/testserver/ throwaway local HTTP target for dev testing, not part of the tool
+cmd/testserver/ standalone process wrapping internal/testtarget, for manual dev use
 internal/
   template/     raw HTTP request parsing, §marker§ detection/injection
   payload/      payload generators + processing-rule chains
   attack/       attack-mode orchestration (sniper, battering ram, pitchfork, cluster bomb)
   engine/       worker pool, shared http.Client, rate limiter, result streaming
   match/        match/filter rules + value extraction
+  chain/        multi-stage request chaining (extract a value, feed it into a later request)
+  testtarget/   the mock login handler cmd/testserver and the web demo both attack
   config/       save/load attack configs (not built yet)
-  server/       web UI backend, HTTP+WS (not built yet)
-web/            static frontend (not built yet)
+  server/       web UI backend: HTTP+WS, hand-rolled stdlib WebSocket layer
+web/            static frontend (index.html, no build step)
 ```
 
 ## Roadmap
 
-1. Multi-stage request chaining — extract a value (CSRF token, session
-   cookie) from one response and feed it into a later request in the same
-   run.
-2. Web UI — an `internal/server` HTTP+WS backend and a `web/` frontend
-   consuming the engine's result/flag stream, replacing the CLI's console
-   printer as the primary interface.
+The next non-optional step is a real attack-configuration flow — submitting
+your own request template, markers, attack mode, payload generator(s), and
+match rules, instead of the CLI's and web UI's current hardcoded demo
+attack. See [`STATUS.md`](./STATUS.md) for the detailed plan.
 
 ## Legal
 

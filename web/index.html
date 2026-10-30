@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Intruder — demo attack</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14161a;
+    --panel: #1c1f26;
+    --border: #2b2f3a;
+    --text: #e4e6eb;
+    --muted: #8a8f9c;
+    --accent: #e0963c;
+    --ok: #3fb97f;
+    --err: #e05a4e;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem;
+  }
+  h1 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0 0 0.25rem;
+  }
+  p.sub {
+    color: var(--muted);
+    margin: 0 0 1.5rem;
+    font-size: 0.85rem;
+  }
+  button {
+    background: var(--accent);
+    color: #1a1200;
+    border: none;
+    border-radius: 4px;
+    padding: 0.55rem 1.1rem;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  #status {
+    margin: 1rem 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+    min-height: 1.2em;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+  th, td {
+    text-align: left;
+    padding: 0.4rem 0.7rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+  }
+  tr.hit {
+    background: rgba(63, 185, 127, 0.12);
+  }
+  tr.hit td:first-child {
+    color: var(--ok);
+    font-weight: 700;
+  }
+  td.error {
+    color: var(--err);
+  }
+</style>
+</head>
+<body>
+  <h1>Intruder — demo attack</h1>
+  <p class="sub">
+    Sniper run against a disposable local login endpoint (correct password:
+    <code>hunter2</code>). Streamed live over a WebSocket.
+  </p>
+  <button id="run">Run demo attack</button>
+  <div id="status"></div>
+  <table>
+    <thead>
+      <tr><th></th><th>Status</th><th>Length</th><th>Time (ms)</th><th>Payload</th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <script>
+    const runBtn = document.getElementById('run');
+    const statusEl = document.getElementById('status');
+    const rowsEl = document.getElementById('rows');
+
+    function addRow(msg) {
+      const tr = document.createElement('tr');
+      if (msg.hit) tr.className = 'hit';
+      const mark = msg.hit ? '★' : '';
+      if (msg.error) {
+        tr.innerHTML =
+          `<td>${mark}</td><td class="error" colspan="3">${escapeHTML(msg.error)}</td>` +
+          `<td>${escapeHTML(msg.payload || '')}</td>`;
+      } else {
+        tr.innerHTML =
+          `<td>${mark}</td><td>${msg.status}</td><td>${msg.length}</td>` +
+          `<td>${msg.duration_ms}</td><td>${escapeHTML(msg.payload || '')}</td>`;
+      }
+      rowsEl.appendChild(tr);
+    }
+
+    function escapeHTML(s) {
+      return s.replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    runBtn.addEventListener('click', () => {
+      runBtn.disabled = true;
+      rowsEl.innerHTML = '';
+      statusEl.textContent = 'connecting...';
+
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+      ws.onopen = () => { statusEl.textContent = 'running...'; };
+
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'result') {
+          addRow(msg);
+        } else if (msg.type === 'done') {
+          statusEl.textContent = `done: ${msg.total} requests, ${msg.hits} flagged`;
+          runBtn.disabled = false;
+        } else if (msg.type === 'error') {
+          statusEl.textContent = `error: ${msg.message}`;
+          runBtn.disabled = false;
+        }
+      };
+
+      ws.onerror = () => {
+        statusEl.textContent = 'connection error';
+        runBtn.disabled = false;
+      };
+
+      ws.onclose = () => { runBtn.disabled = false; };
+    });
+  </script>
+</body>
+</html>

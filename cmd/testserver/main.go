@@ -7,31 +7,16 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"net/http"
-	"time"
+
+	"intruder/internal/testtarget"
 )
 
 func main() {
 	addr := flag.String("addr", ":8089", "listen address")
 	flag.Parse()
 
-	http.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		// a bit of artificial latency so throughput/timing differences are
-		// visible in results instead of everything returning in <1ms
-		time.Sleep(15 * time.Millisecond)
-
-		pass := r.URL.Query().Get("password")
-		if pass == "hunter2" {
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprintln(w, "welcome back")
-			return
-		}
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintln(w, "invalid credentials")
-	})
-
-	log.Printf("test target listening on %s (try /login?password=hunter2)", *addr)
-	log.Fatal(http.ListenAndServe(*addr, nil))
+	log.Printf("test target listening on %s (try /login?password=%s)", *addr, testtarget.CorrectPassword)
+	log.Fatal(http.ListenAndServe(*addr, testtarget.LoginHandler()))
 }

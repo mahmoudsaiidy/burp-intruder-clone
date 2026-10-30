@@ -23,26 +23,29 @@ modes, payload handling, concurrency model, and results workflow.
 ## Architecture (agreed, see original design discussion for full rationale)
 
 ```
-cmd/server/     entry point: HTTP+WS server, wires everything (NOT BUILT YET)
-cmd/cli/        headless entry point — exists now, runs one hardcoded Sniper attack
-cmd/testserver/ throwaway local HTTP target for dev testing only, not part of the tool
+cmd/server/     entry point: HTTP+WS server, serves web/ and the /ws demo attack — DONE (first slice)
+cmd/cli/        headless entry point — runs one hardcoded Sniper attack
+cmd/testserver/ standalone process wrapping internal/testtarget, for manual dev use
 internal/
   template/     raw HTTP request parsing, §marker§ detection/injection, Build() -> *http.Request
   payload/      Generator interface; Wordlist, NumericRange, BruteForce, processing-rule Chain — all DONE
   attack/       attack-mode orchestration; Sniper, Battering ram, Pitchfork, Cluster bomb all DONE
   engine/       worker pool, shared http.Client, rate limiter+jitter, Result streaming — DONE
   match/        match/filter rules on engine.Result + value extraction — DONE
+  chain/        multi-stage request chaining (extract a value, feed it into a later request) — DONE
+  testtarget/   the mock login handler cmd/testserver and the web demo both attack — DONE
   config/       save/load attack configs — NOT BUILT YET
-  server/       web UI backend (HTTP+WS) — NOT BUILT YET
-web/            static frontend — NOT BUILT YET
+  server/       web UI backend (HTTP+WS + hand-rolled WebSocket layer) — DONE (first slice: demo attack only)
+web/            static frontend (index.html, no build step) — DONE (first slice)
 ```
 
 Concurrency model: payload generator (writer goroutine) → bounded job
 channel → N worker goroutines (shared `*http.Client` for connection reuse)
-→ bounded result channel → consumer (currently: CLI printer; later: WS hub).
-One `context.Context` per attack run for clean cancellation. Full design
-rationale was discussed and agreed before any code was written — see git
-log / chat history if the "why" behind any of this needs revisiting.
+→ bounded result channel → consumer (CLI printer, or now the web UI's
+WebSocket stream via `internal/server`). One `context.Context` per attack
+run for clean cancellation. Full design rationale was discussed and agreed
+before any code was written — see git log / chat history if the "why"
+behind any of this needs revisiting.
 
 ## Done
 
@@ -247,6 +250,69 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       fully tested package; hooking a chain into the CLI's demo (or a web
       UI run) is follow-up wiring, not a design question anymore.
 
+- [x] **Web UI, first slice** — `internal/server` (HTTP+WS backend) +
+      `web/index.html` (static frontend), `cmd/server` as the entry point.
+      Not the full original plan yet (a real "configure your own attack"
+      flow needs `internal/config`, still not built — see item 2 below),
+      but the architecture's other end-to-end proof: `engine.Result` /
+      `match.Flagged` driving a *live web page* instead of just the CLI's
+      console printer, the thing STATUS.md has been deferring since the
+      very first entry.
+      - **WebSocket layer is hand-rolled stdlib, not a third-party
+        module** (`internal/server/websocket.go`) — `go.mod` has had zero
+        dependencies through every package so far, and what this needed
+        was narrow: handshake, unmasked server→client text frames,
+        answering pings, noticing a client close. That's RFC 6455 §1.3 /
+        §5, not a reason to take on `gorilla/websocket` or similar.
+        Explicitly *not* implemented, because nothing here needs it:
+        fragmented messages (everything sent/expected is a single FIN
+        frame), the permessage-deflate extension, UTF-8 validation. A
+        fragmented frame from a client is reported as an error rather than
+        mishandled.
+      - `cmd/server/main.go` — serves `web/` and wires `/ws` to
+        `internal/server.NewHandler`. Self-contained: no second process to
+        start first (see next bullet).
+      - `internal/testtarget` — the mock login handler **refactored out of
+        `cmd/testserver`** into its own package (`LoginHandler()`,
+        `CorrectPassword`) so both `cmd/testserver` (a real standalone
+        process, for manual/interactive dev use) and the web demo attack
+        can use it. The web demo (`internal/server/demo.go`) starts its
+        own instance on an ephemeral `127.0.0.1:0` port per WebSocket
+        connection, so `go run ./cmd/server` + opening the page in a
+        browser needs nothing else running first.
+      - `/ws` runs the same hardcoded Sniper demo `cmd/cli` already ran
+        (same wordlist, same single-marker request), now streamed as one
+        JSON `wsMessage` per `engine.Result` (`type: "result"`, with
+        `hit`/`status`/`length`/`duration_ms`/`payload`, or `error` when
+        the request itself failed) followed by one `type: "done"` summary
+        (`total`, `hits`) and a clean WebSocket close. A background reader
+        on the connection cancels the attack's context the instant the
+        client disconnects or sends its own close frame, so a closed
+        browser tab doesn't leave the demo attack running to completion
+        for nothing.
+      - `web/index.html` — single self-contained file (inline CSS/JS, no
+        build step, matches the "no native-toolchain dependency" stack
+        decision above), a button that opens the WebSocket and renders a
+        live results table, starring flagged rows.
+      Tests: `internal/server/websocket_test.go` — `acceptKey` against the
+      literal RFC 6455 worked example (not just self-consistency), a
+      rejected non-WebSocket request, a full real-TCP handshake +
+      text-frame + close exercised through an actual `httptest.Server`
+      (the stdlib has no WebSocket client, so the test rolls the minimum
+      one itself: handshake + masked frame writes; frame *decoding* reuses
+      the package's own `decodeFrame`, which already handles masked and
+      unmasked frames identically by reading the bit off the wire), and a
+      `net.Pipe`-based check that a ping is answered with a pong and never
+      surfaces to `ReadMessage`'s caller. `internal/server/demo_test.go` —
+      a full `/ws` run against a real `httptest.Server` asserting the
+      exact message sequence (one `result` per wordlist entry, exactly one
+      flagged, matching the `hunter2` payload, a `done` with the right
+      `total`/`hits`), plus the static-file-serving branch of
+      `NewHandler`. `go test -race ./...` passes, `internal/server`
+      included; also manually verified live — `go run ./cmd/server` plus
+      an independent raw-socket WebSocket client (not the Go test
+      harness) got the same 6-requests/1-hit result over real TCP.
+
 ## Next step
 
 1. **(Optional, quick)** Give `cmd/testserver` a second query field (e.g.
@@ -257,19 +323,25 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
    `StatusMatcher` — end to end the same way Sniper already is. Proves
    things against a live server, not just unit tests. Still
    optional/follow-up, not a blocker.
-2. **(Optional, quick)** Wire `internal/chain.Resolve` into `cmd/cli` (or a
-   short-lived demo variant): a `/csrf`-style endpoint on
-   `cmd/testserver` that `cmd/testserver`'s `/login` handler requires a
-   valid token from, one `chain.Stage` fetching it, then a normal Sniper
-   run against the chain-resolved template. `internal/chain`'s own tests
-   already prove the mechanism works; this would just prove it live,
-   the same spirit as item 1.
-3. **Web UI**: `internal/server` (HTTP+WS backend) + `web/` (static
-   frontend) consuming the `engine.Result`/`match.Flagged` stream over
-   WebSockets instead of the CLI's console printer. This is the last item
-   in the original plan and the biggest single chunk of remaining work —
-   expect it to need its own multi-session arc, not a single sitting. With
-   chaining now done, this is the next non-optional step.
+2. **Real attack configuration (non-optional, the next meaty step)**: the
+   web UI and CLI both still only run one hardcoded Sniper demo. The
+   actual tool needs a way to submit a raw request template, mark
+   markers, choose an attack mode, supply payload generator(s) (wordlist
+   upload, numeric range, brute force, rule chain), set match/filter
+   rules, and optionally a `chain.Stage` list — then run it and watch
+   results stream in. This is `internal/config` (save/load attack
+   configs, still not built) plus either new `/ws` message types for the
+   web UI to submit a config before the server starts streaming (instead
+   of today's "connect and it just runs the hardcoded demo"), or a
+   request-building page in `web/`. Needs its own design pass — not
+   started.
+3. **(Optional, quick)** Wire `internal/chain.Resolve` into `cmd/cli` (or
+   the web demo): a `/csrf`-style endpoint on `cmd/testserver`/
+   `internal/testtarget` that `/login` requires a valid token from, one
+   `chain.Stage` fetching it, then a normal Sniper run against the
+   chain-resolved template. `internal/chain`'s own tests already prove the
+   mechanism works; this would just prove it live, the same spirit as
+   item 1.
 
 ## How to resume this project (e.g. if a session runs out of budget)
 
