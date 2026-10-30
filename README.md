@@ -1,118 +1,160 @@
-# burp-intruder-clone
+<div align="center">
 
-A from-scratch Go implementation of the attack engine behind Burp Suite's
-**Intruder** module — for use against targets you are authorized to test.
-It isn't a reverse-engineered copy of Burp's binary; it independently
-implements the same attack modes, payload handling, concurrency model, and
-results workflow, as a standalone Go core with a UI-agnostic design.
+# Intruder
 
-## Status
+**A from-scratch Go implementation of the attack engine behind Burp Suite's Intruder — for authorized security testing.**
 
-Core engine, all four attack modes, payload/match tooling, and multi-stage
-request chaining are built and tested. A first slice of the web UI is up
-too — an HTTP+WS server streaming a live demo attack to a browser page —
-though it still only runs one hardcoded attack, the same as the CLI; a real
-"configure your own attack" flow is the next non-optional step. See
-[`STATUS.md`](./STATUS.md) for the detailed, up-to-date breakdown and the
-resume point for ongoing work.
+[![CI](https://github.com/mahmoudsaiidy/burp-intruder-clone/actions/workflows/ci.yml/badge.svg)](https://github.com/mahmoudsaiidy/burp-intruder-clone/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/badge/go-1.24%2B-00ADD8?logo=go)](https://go.dev)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
 
-## What it does
+[Quick start](#quick-start) · [Features](#features) · [Usage](#usage) · [Architecture](#architecture) · [Contributing](#contributing) · [Status](#project-status)
 
-Given a raw HTTP request with one or more `§marker§`-delimited injection
-points, it substitutes payload values into those markers, fires the
-resulting requests concurrently against the target, and streams back
-results you can match/flag on status code, length, headers, or body
-content — the same core workflow as Burp Intruder, driven entirely from
-Go code (no GUI yet).
+</div>
 
-- **Attack modes** — `internal/attack`
-  - **Sniper** — one marker varies at a time, others held at their
-    original value; repeats for each marker.
-  - **Battering ram** — a single payload set broadcast into every marker
-    at once.
-  - **Pitchfork** — one payload generator per marker, walked in lockstep;
-    stops when the shortest generator is exhausted.
-  - **Cluster bomb** — one payload generator per marker, full combinatorial
-    product across all of them.
-- **Payload generators** — `internal/payload`
-  - `Wordlist` — a fixed list of values.
-  - `NumericRange` — an arithmetic sequence with optional zero-padding.
-  - `BruteForce` — every string drawable from a charset, shortest first.
-  - `Chain` — wraps any generator with an ordered list of processing
-    rules (URL-encode, Base64-encode, prefix, suffix, upper/lower case),
-    composing with every attack mode with no extra code.
-- **Engine** — `internal/engine`: a bounded worker pool over a shared,
-  connection-pooled `http.Client`, with a rate limiter + jitter, a
-  response body-size cap, and context-based cancellation.
-- **Matching & extraction** — `internal/match`: `Matcher`s
-  (status/length/body-regex/header-regex/error, composable with
-  and/or/not) tag each result without dropping or reordering it — a
-  "flag column," not a filter — plus `Extractor`s for pulling a value
-  (e.g. a token) out of a response body or header.
-- **Request templates** — `internal/template`: parses a raw HTTP request,
-  finds `§marker§` positions, and rebuilds a concrete `*http.Request` for
-  a given payload set.
-- **Multi-stage chaining** — `internal/chain`: fires one or more
-  prerequisite requests before the main attack (a login, a token fetch),
-  pulls a value out of each response with a `match.Extractor`, and
-  substitutes it into later stages' requests and into the final attack
-  template — e.g. grab a CSRF token or session cookie and carry it into
-  every attack request.
-- **Web UI** — `internal/server` + `web/`: an HTTP+WS backend (hand-rolled
-  stdlib WebSocket layer, no third-party dependency) streaming
-  `engine.Result`/`match.Flagged` to a browser page in real time, served
-  by `cmd/server`. Currently runs one hardcoded Sniper demo per connection
-  against its own disposable local target — not yet a general front end
-  for arbitrary attacks (see Status above).
+---
 
-## Requirements
+Intruder automates sending many HTTP requests with varying payloads against
+a target you're authorized to test, and lets you match/flag the responses
+that matter — the same workflow as Burp Suite's Intruder module. It is
+**not** a reverse-engineered copy of Burp's binary; it's an independent,
+from-scratch implementation in Go that matches its attack modes, payload
+handling, concurrency model, and results workflow, built as a standalone
+core with a CLI and a web UI on top.
 
-- Go 1.24+
+> **⚠️ Authorized use only.** This tool fires concurrent, automated
+> requests at whatever target you point it at. Only use it against systems
+> you own or have explicit, documented authorization to test. See
+> [Legal & responsible use](#legal--responsible-use).
 
-## Build & test
+## Features
+
+- **Four attack modes**, matching Burp's own semantics exactly:
+  - **Sniper** — one marker varies at a time, others held at their original value.
+  - **Battering ram** — a single payload broadcast into every marker at once.
+  - **Pitchfork** — one generator per marker, walked in lockstep.
+  - **Cluster bomb** — one generator per marker, full combinatorial product.
+- **Four payload generator types** — wordlist, numeric range (with
+  zero-padding), brute force (charset + length range), and processing-rule
+  chains (URL-encode, Base64, prefix/suffix, case) that wrap *any* other
+  generator.
+- **Multi-stage request chaining** — fire a setup request (a login, a
+  token fetch), extract a value from its response, and carry it forward
+  into later requests — e.g. a CSRF token or session cookie.
+- **Match & filter** on status code, response length, headers, or a body
+  regex, with `AND`/`OR`/`NOT` combinators, plus an extractor for pulling
+  values out of responses (grep-style, with capture-group support).
+- **A tuned, concurrent HTTP engine** — a bounded worker pool over a
+  shared, connection-pooled client, optional rate limiting + jitter, and
+  context-based cancellation.
+- **Two interfaces**: a headless CLI and a web UI (HTTP + WebSocket,
+  live-streaming results to the browser) over the same engine.
+- **Zero third-party dependencies.** Everything, including the WebSocket
+  layer, is pure Go standard library — see [Why no dependencies?](#why-no-third-party-dependencies).
+
+## Quick start
+
+Requires **Go 1.24+**. Nothing else — no CGO, no native toolchain, no
+frontend build step.
 
 ```sh
+git clone https://github.com/mahmoudsaiidy/burp-intruder-clone
+cd burp-intruder-clone
 go build ./...
-go test -race ./...
 ```
 
-## Try it
-
-`cmd/cli` is a headless demo that wires everything together and runs a
-Sniper attack against a disposable local target — useful for seeing the
-whole pipeline run end to end.
+Then either run the CLI demo:
 
 ```sh
-# terminal 1: start the mock login target (correct password is "hunter2")
-go run ./cmd/testserver
-
-# terminal 2: run the Sniper demo against it
 go run ./cmd/cli
 ```
 
-The CLI tries a small built-in wordlist against the target's `password`
-field and prints a results table, flagging the `200` response:
-
-```
-HIT    STATUS  PAYLOAD          LENGTH   TIME      ERROR
-                123456           -        -         ...
-...
-***    200     hunter2          ...      ...
-```
-
-`cmd/cli` currently runs one hardcoded Sniper attack; it's a proof that
-the engine works, not yet a general-purpose front end.
-
-You can also run the same kind of demo in a browser:
+...or open the web UI:
 
 ```sh
 go run ./cmd/server
 # open http://localhost:8080 and click "Run demo attack"
 ```
 
-`cmd/server` is self-contained — it starts its own disposable local target
-per run, so there's no second process to start first. It serves the page
-from `web/` and streams results to it live over a WebSocket at `/ws`.
+Both currently run a built-in demo attack (a Sniper run against a
+disposable local login endpoint) rather than taking your own request
+template yet — see [Project status](#project-status) for what's next.
+
+## Usage
+
+### CLI
+
+```sh
+go run ./cmd/cli
+```
+
+Wires a request template, a wordlist, the Sniper attack mode, the engine,
+and a `StatusMatcher` together, then prints a results table — fires six
+requests against a mock `/login` endpoint and flags the one that returns
+`200`:
+
+```
+HIT    STATUS  PAYLOAD          LENGTH   TIME      ERROR
+                123456           -        -
+                password         -        -
+                admin            -        -
+***    200     hunter2          ...      ...
+                letmein          -        -
+                qwerty           -        -
+
+done: 6 requests (1 flagged) in ...
+```
+
+### Web UI
+
+```sh
+go run ./cmd/server
+```
+
+Self-contained — it starts its own disposable local target per run, so
+there's nothing else to start first. Open `http://localhost:8080`, click
+**Run demo attack**, and watch results stream into a live table over a
+WebSocket at `/ws`.
+
+### As a library
+
+Every attack-engine package lives under `internal/` for now (see
+[Project layout](#project-layout)), so it isn't importable from outside
+this module yet. If you want to build on the engine directly rather than
+through the CLI/web UI, open an issue — promoting a package to a public
+`pkg/` API is a reasonable ask and easy to prioritize if there's demand.
+
+## Architecture
+
+```
+request template + markers (§payload§)
+            │
+   payload generator(s)  ──▶  attack mode (sniper / battering ram / pitchfork / cluster bomb)
+            │                            │
+  [optional: chain.Resolve              bounded job channel
+   injects values from                   │
+   setup requests first]          N worker goroutines, shared *http.Client
+                                          │
+                                 bounded result channel
+                                          │
+                              match/filter + extract  ──▶  CLI printer / WebSocket stream
+```
+
+One `context.Context` per attack run drives clean cancellation end to end
+— closing a browser tab mid-attack, for instance, cancels the run instead
+of leaving it to finish for nothing.
+
+### Why no third-party dependencies?
+
+`go.mod` has stayed dependency-free through every package, including the
+web UI's WebSocket layer (`internal/server/websocket.go`), which is a
+~250-line, intentionally-scoped implementation of RFC 6455 rather than a
+pull of `gorilla/websocket` or similar. This is a deliberate project
+constraint, not an oversight — it keeps the build trivial (`go build ./...`
+and nothing else, ever) and the dependency surface at zero. New
+dependencies are possible but are expected to be discussed in an issue
+first; see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## Project layout
 
@@ -133,15 +175,40 @@ internal/
 web/            static frontend (index.html, no build step)
 ```
 
-## Roadmap
+## Project status
 
-The next non-optional step is a real attack-configuration flow — submitting
-your own request template, markers, attack mode, payload generator(s), and
-match rules, instead of the CLI's and web UI's current hardcoded demo
-attack. See [`STATUS.md`](./STATUS.md) for the detailed plan.
+Core engine, all four attack modes, payload/match tooling, multi-stage
+chaining, and a first slice of the web UI are built and tested
+(`go test -race ./...` is green). Both interfaces currently run one
+hardcoded demo attack rather than taking a user-supplied request — real
+attack configuration is the next planned step.
 
-## Legal
+[`STATUS.md`](./STATUS.md) is the authoritative, continuously updated
+breakdown: what's done, what's deliberately deferred, and the exact next
+step, kept detailed enough that picking the project back up doesn't
+require re-deriving any design decisions.
 
-This tool sends concurrent, automated requests to whatever target you
-point it at. Only use it against systems you own or have explicit
-authorization to test.
+## Contributing
+
+Contributions are welcome — this is an early-stage project with real open
+work (see `STATUS.md`'s "Next step" section). Please read
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening a PR: it covers
+setup, the testing style this project uses, and the "open an issue before
+a big change" convention. Everyone participating is expected to follow the
+[Code of Conduct](./CODE_OF_CONDUCT.md).
+
+Found a security issue in the tool itself (not a target you're testing
+*with* it)? See [`SECURITY.md`](./SECURITY.md) for how to report it
+privately.
+
+## Legal & responsible use
+
+This tool sends concurrent, automated requests to whatever target it's
+pointed at. **Only use it against systems you own or have explicit,
+written authorization to test.** Unauthorized use against third-party
+systems may be illegal in your jurisdiction. The author and contributors
+accept no liability for misuse — see the [LICENSE](./LICENSE).
+
+## License
+
+[MIT](./LICENSE) © Mahmoud Saiidy
