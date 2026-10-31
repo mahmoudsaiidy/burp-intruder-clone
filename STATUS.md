@@ -34,7 +34,7 @@ internal/
   match/        match/filter rules on engine.Result + value extraction — DONE
   chain/        multi-stage request chaining (extract a value, feed it into a later request) — DONE
   testtarget/   the mock login handler cmd/testserver and the web demo both attack — DONE
-  config/       save/load attack configs — NOT BUILT YET
+  config/       JSON attack-config spec + Build/Run orchestrator — DONE
   server/       web UI backend (HTTP+WS + hand-rolled WebSocket layer) — DONE (first slice: demo attack only)
 web/            static frontend (index.html, no build step) — DONE (first slice)
 ```
@@ -313,35 +313,117 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       an independent raw-socket WebSocket client (not the Go test
       harness) got the same 6-requests/1-hit result over real TCP.
 
+- [x] **Real attack configuration, backend slice** — `internal/config`,
+      new package, the "next meaty step" from the previous version of this
+      file: a JSON-serializable `AttackConfig` (raw template, target,
+      `Mode`, one `GeneratorSpec` per marker Mode needs, an optional
+      recursive `MatcherSpec` tree — `and`/`or`/`not` combinators included
+      — and an optional `[]StageSpec` chain) plus the code that builds it
+      into the live `template.Template` / `payload.Generator` /
+      `match.Matcher` / `chain.Stage` objects the rest of the codebase
+      already defines, and runs them end to end.
+      - `config.go` — `AttackConfig`, `TargetSpec`, `Load`/`LoadFile`
+        (`json.Decoder` with `DisallowUnknownFields`, so a typo in a
+        hand-written config fails loudly instead of silently doing
+        nothing).
+      - `generator.go` — `GeneratorSpec` (wordlist / numeric_range /
+        brute_force) + `RuleSpec`, building a bare generator or, if
+        `Rules` is set, a `*payload.Chain` wrapping it — same
+        decorator relationship `internal/payload` already has.
+      - `matcher.go` — `MatcherSpec`, recursive for `and`/`or`/`not`,
+        covering every `internal/match` matcher plus Burp's six compare
+        ops (`eq`/`ne`/`lt`/`gt`/`le`/`ge`, defaulting to `eq`).
+      - `stage.go` — `StageSpec`/`ExtractorSpec`, the JSON form of
+        `chain.Stage`/`match.Extractor`.
+      - `build.go` — `AttackConfig.Build()` does every validation in one
+        place: template parses, `Mode` is one of the four known modes,
+        generator count matches what `Mode` needs (1 for Sniper/Battering
+        ram, one per marker for Pitchfork/Cluster bomb — checked against
+        the *parsed* template's own marker count, not just trusted from
+        the config), each generator/matcher/stage spec itself builds
+        cleanly. No `Matcher` configured defaults to `match.Or{}` (flags
+        nothing — same "no conditions enabled" default Burp's filter has,
+        not an error). `Workers`/`TimeoutSeconds` get defaults (5, 30s)
+        when unset.
+      - `run.go` — `AttackConfig.Run(ctx)` (and `Built.Run`) is the one
+        place that now wires a built config into a real run: resolves any
+        chain stages first (re-parsing the attack template afterward,
+        since substitution shifts §marker§ byte offsets even though it
+        never touches the markers themselves), switches on `Mode` to pick
+        `attack.Jobs` / `BatteringRamJobs` / `PitchforkJobs` /
+        `ClusterBombJobs`, builds an `engine.Pool`, and returns
+        `match.Flag`'s output channel plus the expected request total —
+        the exact wiring `cmd/cli`'s demo and the web UI's demo attack
+        each used to hand-roll separately (see both those entries above).
+      Tests: `config_test.go` — every spec's `Build()` against valid and
+      invalid input (bad types, bad regexes, missing required fields,
+      `and`/`or` with no children, `not` with no child, mode/generator-
+      count mismatches for all four modes), `Load`'s unknown-field
+      rejection, and the default-value behavior. `run_test.go` —
+      `httptest`-backed integration tests: a Sniper run and a Pitchfork
+      run end to end from JSON (mirroring `internal/attack`'s own test
+      style), and a chain-stage run proving a config-described CSRF-token
+      stage's value really reaches the main attack's requests. Full suite
+      (`go test -race ./...`) passes, config package included.
+      **Wired into both front ends**: `cmd/cli` now runs
+      `./intruder-cli path/to/config.json` through `config.Run` (no
+      arguments still runs the original hardcoded demo, byte-for-byte
+      unchanged — `runDemo()` in `cmd/cli/main.go`); the web UI gained a
+      new `/ws/config` endpoint (`internal/server/config_attack.go`,
+      `handleWSConfig` in `server.go`) that reads one JSON `AttackConfig`
+      as the client's first text frame and streams the same `wsMessage`
+      shape `/ws` already does, plus a `"started"` message carrying the
+      expected total before the first result (`/ws` itself is untouched —
+      still the hardcoded demo, zero behavior change for the existing
+      `web/index.html` button). `internal/server/config_attack_test.go`
+      covers `/ws/config` end to end (a Sniper run against a mock login
+      handler the test itself serves, checking `started`/`result`/`done`)
+      and a config that fails `Build()` coming back as a single `"error"`
+      message rather than a panic. Also manually verified live: built
+      `cmd/testserver` and `cmd/cli` as real binaries, ran the test target
+      on a real port, and fed `cmd/cli` a JSON config file — got the same
+      `hunter2` → `200` hit, byte-for-byte the same results-table format
+      the hardcoded demo prints.
+      **Not built yet**: a request-builder *page* in `web/` that composes
+      the JSON from form inputs — today a web client has to construct and
+      send the `AttackConfig` JSON itself (exactly what
+      `config_attack_test.go` does). `internal/config` and `/ws/config`
+      are the real, tested backend half of "real attack configuration";
+      the UI half is its own, more purely front-end-design task — see
+      Next step below.
+
 ## Next step
 
-1. **(Optional, quick)** Give `cmd/testserver` a second query field (e.g.
-   `username`) alongside `password`, and add a CLI demo (or a short-lived
-   `main.go` variant) exercising Pitchfork and/or Cluster bomb, a
-   `NumericRange`/`BruteForce` generator, a `Chain`-wrapped generator
-   (the `internal/payload` rule-chain one), and `match.Flag` with a
-   `StatusMatcher` — end to end the same way Sniper already is. Proves
-   things against a live server, not just unit tests. Still
-   optional/follow-up, not a blocker.
-2. **Real attack configuration (non-optional, the next meaty step)**: the
-   web UI and CLI both still only run one hardcoded Sniper demo. The
-   actual tool needs a way to submit a raw request template, mark
-   markers, choose an attack mode, supply payload generator(s) (wordlist
-   upload, numeric range, brute force, rule chain), set match/filter
-   rules, and optionally a `chain.Stage` list — then run it and watch
-   results stream in. This is `internal/config` (save/load attack
-   configs, still not built) plus either new `/ws` message types for the
-   web UI to submit a config before the server starts streaming (instead
-   of today's "connect and it just runs the hardcoded demo"), or a
-   request-building page in `web/`. Needs its own design pass — not
-   started.
-3. **(Optional, quick)** Wire `internal/chain.Resolve` into `cmd/cli` (or
-   the web demo): a `/csrf`-style endpoint on `cmd/testserver`/
-   `internal/testtarget` that `/login` requires a valid token from, one
-   `chain.Stage` fetching it, then a normal Sniper run against the
-   chain-resolved template. `internal/chain`'s own tests already prove the
-   mechanism works; this would just prove it live, the same spirit as
-   item 1.
+1. **Request-builder UI (the natural next meaty step)**: `internal/config`
+   and `/ws/config` (done above) can build and run any attack the four
+   modes support, but only if something hands them JSON. Build a page in
+   `web/` — a textarea for the raw request template, a way to mark
+   §markers§ (or just let the person type them directly, simplest first
+   cut), a mode picker, a generator editor per marker (wordlist textarea /
+   numeric range / brute force, with an optional rule-chain picker), a
+   match-rule builder, and optionally a chain-stage editor — that
+   assembles an `AttackConfig` JSON document client-side and opens
+   `/ws/config` with it, rendering the same live results table `/ws`'s
+   demo already does. Doesn't need to be pretty on the first pass; it
+   needs to prove a person can configure and run their *own* attack
+   end-to-end through the browser, which nothing does yet. No design
+   questions left on the backend side — this is UI construction against
+   an already-tested API.
+2. **(Optional, quick)** Give `cmd/testserver` a second query field (e.g.
+   `username`) alongside `password`, matching the two-field mock server
+   `internal/config`'s own Pitchfork test already spins up ad hoc — would
+   let `cmd/testserver` (the standalone dev process, not just test code)
+   exercise Pitchfork/Cluster bomb/NumericRange/BruteForce/Chain-wrapped
+   generators too, the same way `cmd/cli path/to/config.json` already
+   proved Sniper live. Still optional/follow-up, not a blocker.
+3. **(Optional, quick)** Give `cmd/testserver`/`internal/testtarget` a
+   `/csrf`-style endpoint that `/login` requires a valid token from, then
+   add an example chain config (or wire one into `cmd/cli`'s own demo) so
+   `internal/chain` + `internal/config`'s chain support can be exercised
+   against the standalone dev server, not just `httptest`. The mechanism
+   is already proven twice over (`internal/chain`'s own tests, and
+   `internal/config/run_test.go`'s `TestRun_WithChain`) — this would just
+   be a third, more manual way to poke at it.
 
 ## How to resume this project (e.g. if a session runs out of budget)
 
