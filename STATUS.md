@@ -482,22 +482,54 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       `go build ./...`, `go vet ./...`, `gofmt -l .` (clean), and
       `go test -race ./...` all pass, `internal/testtarget` included.
 
+## Known bug (found while documenting marker-in-body usage)
+
+**`internal/template.Build` does not recalculate `Content-Length` after
+injecting payload values**, so a marker placed in a request *body* (as
+opposed to the URL/query/headers, where this has no effect) silently
+corrupts the request whenever the payload's byte length differs from
+whatever `Content-Length` was written in the template.
+
+Confirmed live (not just by reading the code): built a template with
+`Content-Length: 17` and a body `{"token":"§t§"}`, then called `Build` with
+a 30-character payload. `req.ContentLength` stayed `17`, and reading
+`req.Body` back returned exactly `{"token":"a_much_` (17 bytes) — the
+payload is **silently truncated client-side**, before the request is even
+sent, not rejected or flagged anywhere. A payload shorter than the
+original placeholder would instead leave `Content-Length` promising bytes
+the body never supplies.
+
+This is a real gap, not just a doc caveat (README's new "Beyond logins:
+paths and bodies" section under Usage documents the workaround — same-
+length payloads, or a target that accepts chunked encoding — but the
+underlying behavior should be fixed, not just documented around).
+
+**Suggested fix, next session:** in `Template.Build` (`internal/template/parser.go`),
+after `Inject` resolves `values` into `resolved` but before
+`http.ReadRequest` parses it, detect whether any marker fell inside the
+body (i.e. after the blank-line header/body boundary) and, if so,
+recompute `Content-Length` from the actual resolved body length before
+parsing — or, simpler, let `http.ReadRequest` parse normally and then
+override `req.ContentLength` (and the `Content-Length` header text) from
+`len(bodyBytes)` whenever a `Content-Length` header is present at all,
+regardless of where the marker was (harmless no-op when nothing in the
+body changed). Needs a test mirroring the repro above, plus one proving a
+header/query-only marker still leaves `Content-Length` untouched when the
+body itself didn't change size.
+
 ## Next step
 
-No specific item is queued right now — both "optional, quick" follow-ups
-from the previous version of this file are done (see above). Candidates
-for a future session, roughly in order of how much they'd actually get
-used:
-
-1. Promote the core engine packages out of `internal/` to a public `pkg/`
+1. **Fix the `Content-Length` bug above** — the most concrete, correctness-
+   affecting item currently open.
+2. Promote the core engine packages out of `internal/` to a public `pkg/`
    API, per the README's "As a library" section — the README already
    invites this on request but nothing's moved yet.
-2. A saved-config library/gallery in the web UI (list, re-load, re-run a
+3. A saved-config library/gallery in the web UI (list, re-load, re-run a
    previously saved `AttackConfig` from `builder.html`, rather than only
    "Preview JSON" + "Load testserver example") — `internal/config`'s
    `LoadFile` already does the hard part for the CLI side; this would be
    the web equivalent.
-3. `internal/payload` has four generator types; Burp Intruder also has a
+4. `internal/payload` has four generator types; Burp Intruder also has a
    "Character substitution" / "Illegal Unicode" / date-range payload type
    historically — worth a look if API-compat with Burp's own payload list
    becomes a goal, but not clearly needed yet.

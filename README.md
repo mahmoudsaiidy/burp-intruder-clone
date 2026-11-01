@@ -30,6 +30,12 @@ core with a CLI and a web UI on top.
 
 ## Features
 
+- **A marker can go anywhere in the request** — `§...§` is found by
+  scanning the raw request text itself, not a fixed set of fields, so the
+  same engine that brute-forces a login's `password` field equally brute-
+  forces a URL path segment (directory/file discovery, à la gobuster/ffuf)
+  or a JSON/form body field, with no special mode needed. See
+  [Beyond logins: paths and bodies](#beyond-logins-paths-and-bodies).
 - **Four attack modes**, matching Burp's own semantics exactly:
   - **Sniper** — one marker varies at a time, others held at their original value.
   - **Battering ram** — a single payload broadcast into every marker at once.
@@ -140,6 +146,51 @@ generator per marker (with optional processing rules), build a match rule,
 and optionally add chain stages — then run it, streamed the same way over
 `/ws/config`. "Load testserver example" fills in a working config against
 `go run ./cmd/testserver` to try it with nothing else to set up first.
+
+### Beyond logins: paths and bodies
+
+A `§marker§` is just a span of the raw request text — `internal/template`
+scans for it the same way wherever it appears, so there's no special mode
+for "attack the URL" vs. "attack a form field." The CLI/web UI demos and
+`examples/` all happen to attack login query params, but the same engine
+covers two other common uses just by moving where the marker sits:
+
+- **Directory/file discovery** — put the marker in the path and feed it a
+  wordlist, same idea as `gobuster`/`dirb`/`ffuf`:
+  ```
+  GET /§dir§ HTTP/1.1
+  Host: target
+  ```
+  Use a `length` or `body_regex` matcher to filter out a uniform 404/soft-
+  404 page so only genuine hits get flagged.
+- **Body brute-forcing** — put the marker in a POST/PUT body field
+  (JSON, form-encoded, whatever the target expects):
+  ```
+  POST /api/reset HTTP/1.1
+  Host: target
+  Content-Type: application/json
+  Content-Length: 17
+
+  {"token":"§t§"}
+  ```
+  **Caveat, confirmed by testing against the live code, not just reading
+  it:** `Content-Length` is read once, as written in the template, and
+  never recalculated after a payload is injected. This isn't just "wrong
+  header, server complains" — `http.Request.Body` is wrapped to the
+  *original* declared length, so a longer payload is **silently truncated
+  client-side before the request is even sent** (verified: a 17-byte
+  `Content-Length` with a 30-character payload injected sends exactly 17
+  bytes of body, cutting the payload off mid-string, no error raised
+  anywhere). A shorter payload instead leaves the connection waiting to
+  write bytes that never come. Until `internal/template.Build`
+  recalculates `Content-Length` after injection (not yet done — tracked in
+  `STATUS.md`), keep every payload the same byte length for a body marker,
+  or use a target that accepts `Transfer-Encoding: chunked` instead of a
+  fixed `Content-Length`.
+
+There isn't a wordlist-free / recursive / auto-calibrating directory-brute
+mode built in (unlike a dedicated tool such as `ffuf`) — you supply the
+wordlist and the matcher yourself, same as any other attack here.
 
 ## Examples
 
