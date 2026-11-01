@@ -223,4 +223,4 @@ accept no liability for misuse — see the [LICENSE](./LICENSE).
 
 ## License
 
-[MIT](./LICENSE) © Mahmoud Saiidy
+[MIT](./LICENSE) © Mahmoud El-Saidy
