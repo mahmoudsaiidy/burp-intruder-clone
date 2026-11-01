@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
 
-[Quick start](#quick-start) · [Features](#features) · [Usage](#usage) · [Architecture](#architecture) · [Contributing](#contributing) · [Status](#project-status)
+[Quick start](#quick-start) · [Features](#features) · [Usage](#usage) · [Examples](#examples) · [Architecture](#architecture) · [Contributing](#contributing) · [Status](#project-status)
 
 </div>
 
@@ -93,10 +93,10 @@ still ahead.
 go run ./cmd/cli
 ```
 
-Wires a request template, a wordlist, the Sniper attack mode, the engine,
-and a `StatusMatcher` together, then prints a results table — fires six
-requests against a mock `/login` endpoint and flags the one that returns
-`200`:
+With no arguments, wires a request template, a wordlist, the Sniper attack
+mode, the engine, and a `StatusMatcher` together by hand, then prints a
+results table — fires six requests against a mock `/login` endpoint and
+flags the one that returns `200`:
 
 ```
 HIT    STATUS  PAYLOAD          LENGTH   TIME      ERROR
@@ -109,6 +109,18 @@ HIT    STATUS  PAYLOAD          LENGTH   TIME      ERROR
 
 done: 6 requests (1 flagged) in ...
 ```
+
+Given a path to a JSON `AttackConfig` instead, it runs that — same
+`internal/config.Run` wiring the web UI's `/ws/config` uses, so a config
+that works from one works from the other:
+
+```sh
+go run ./cmd/testserver &       # the target these examples attack
+go run ./cmd/cli examples/sniper.json
+```
+
+See [Examples](#examples) below for ready-to-run configs covering all four
+attack modes and a chain.
 
 ### Web UI
 
@@ -128,6 +140,27 @@ generator per marker (with optional processing rules), build a match rule,
 and optionally add chain stages — then run it, streamed the same way over
 `/ws/config`. "Load testserver example" fills in a working config against
 `go run ./cmd/testserver` to try it with nothing else to set up first.
+
+## Examples
+
+[`examples/`](./examples) has ready-to-run `AttackConfig` JSON files for
+`cmd/cli` (or paste their contents into `builder.html`'s "Preview JSON" /
+send flow), each targeting `go run ./cmd/testserver`'s default port
+(`:8089`):
+
+| File | Mode | Target endpoint | What it shows |
+| --- | --- | --- | --- |
+| [`sniper.json`](./examples/sniper.json) | Sniper | `/login` | one marker, a wordlist, flags the `200` |
+| [`pitchfork.json`](./examples/pitchfork.json) | Pitchfork | `/login/multi` | two independent markers (username + password) walked in lockstep |
+| [`cluster_bomb.json`](./examples/cluster_bomb.json) | Cluster bomb | `/login/multi` | the same two markers, full combinatorial product |
+| [`chain_csrf.json`](./examples/chain_csrf.json) | Sniper + chain | `/login/secure` (via `/csrf` first) | a setup stage fetches a CSRF token and feeds it into every attack request |
+
+`cmd/testserver` exposes all four endpoints these configs attack —
+`/login` (single field, the original demo target), `/login/multi`
+(independent username + password), `/csrf` (issues a token), and
+`/login/secure` (requires that token plus both credentials) — so Pitchfork,
+Cluster bomb, and chain support all have something real to run against
+outside of `go test`, not just the single-field Sniper demo.
 
 ### As a library
 
@@ -181,7 +214,10 @@ internal/
   engine/       worker pool, shared http.Client, rate limiter, result streaming
   match/        match/filter rules + value extraction
   chain/        multi-stage request chaining (extract a value, feed it into a later request)
-  testtarget/   the mock login handler cmd/testserver and the web demo both attack
+  testtarget/   mock login endpoints cmd/testserver and the web demo attack: a
+                single-field /login (the original demo target), a two-field
+                /login/multi (Pitchfork/Cluster bomb), and a /csrf + gated
+                /login/secure pair (chain support)
   config/       JSON attack-config spec (template/target/mode/generators/matcher/chain) + build/run orchestrator
   server/       web UI backend: HTTP+WS, hand-rolled stdlib WebSocket layer
 web/            static frontend — index.html (demo attack) + builder.html (configure & run your own), no build step

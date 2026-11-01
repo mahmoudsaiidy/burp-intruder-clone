@@ -441,23 +441,66 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       clean; `go test -race ./...` unaffected (no Go files changed — this
       was a `web/`-only addition).
 
+- [x] **Both "optional, quick" items above, done together** — `internal/testtarget`
+      gained three new endpoints alongside the original, byte-for-byte
+      unchanged `/login` (`LoginFunc`, still the original demo target):
+      - `/login/multi` (`MultiFieldLoginFunc`) — independent `username` +
+        `password` query params (`CorrectUsername = "admin"`,
+        `CorrectPassword` reused), `200` only if both are right. Gives
+        Pitchfork/Cluster bomb a real two-marker target to run against
+        outside of `httptest`.
+      - `/csrf` (`CSRFFunc`) — returns `token=<CSRFToken>` in the body,
+        the exact `token=(\w+)` shape `internal/chain`'s and
+        `internal/config`'s own tests already extract with a body-regex
+        extractor, so an example chain config can reuse the same pattern.
+      - `/login/secure` (`SecureLoginFunc`) — like `/login/multi` but also
+        requires `csrf=<CSRFToken>`, i.e. a login that genuinely can't be
+        attacked in one request. Exercises `internal/chain` +
+        `internal/config`'s chain support (fetch the token, then feed it
+        forward) against a real standalone target.
+      - `Mux()` — combines all four endpoints (including the original
+        `/login`) onto one `http.Handler`; `cmd/testserver` now serves
+        this instead of just `LoginHandler()`, and logs all four routes on
+        startup. `internal/server`'s hardcoded demo deliberately keeps
+        using `LoginHandler()` (just `/login`) unchanged, so its exact
+        6-requests/1-hit demo result is untouched.
+      - `internal/testtarget` gained its first test file
+        (`testtarget_test.go`) — table-driven coverage of every endpoint's
+        status-code branches, plus `TestMuxKeepsSingleFieldLoginUnchanged`
+        guarding the compatibility promise `LoginFunc`'s doc comment
+        makes. Previously this package had zero tests.
+      - `examples/` — four ready-to-run `AttackConfig` JSON files
+        (`sniper.json`, `pitchfork.json`, `cluster_bomb.json`,
+        `chain_csrf.json`), one per attack mode plus the chain case, each
+        targeting `cmd/testserver`'s default port. Verified live: built
+        `cmd/testserver` and `cmd/cli` as real binaries, ran the test
+        target, and fed `cmd/cli` each example — every one produces
+        exactly one flagged `200` hit among the rest `401`s, matching each
+        config's intended one correct credential/pair/chain value.
+        README gained an "Examples" section documenting all four
+        alongside the new testtarget endpoints.
+      `go build ./...`, `go vet ./...`, `gofmt -l .` (clean), and
+      `go test -race ./...` all pass, `internal/testtarget` included.
+
 ## Next step
 
-1. **(Optional, quick)** Give `cmd/testserver` a second query field (e.g.
-   `username`) alongside `password`, matching the two-field mock server
-   `internal/config`'s own Pitchfork test already spins up ad hoc — would
-   let `cmd/testserver` (the standalone dev process, not just test code)
-   exercise Pitchfork/Cluster bomb/NumericRange/BruteForce/Chain-wrapped
-   generators too, the same way `cmd/cli path/to/config.json` already
-   proved Sniper live. Still optional/follow-up, not a blocker.
-2. **(Optional, quick)** Give `cmd/testserver`/`internal/testtarget` a
-   `/csrf`-style endpoint that `/login` requires a valid token from, then
-   add an example chain config (or wire one into `cmd/cli`'s own demo) so
-   `internal/chain` + `internal/config`'s chain support can be exercised
-   against the standalone dev server, not just `httptest`. The mechanism
-   is already proven twice over (`internal/chain`'s own tests, and
-   `internal/config/run_test.go`'s `TestRun_WithChain`) — this would just
-   be a third, more manual way to poke at it.
+No specific item is queued right now — both "optional, quick" follow-ups
+from the previous version of this file are done (see above). Candidates
+for a future session, roughly in order of how much they'd actually get
+used:
+
+1. Promote the core engine packages out of `internal/` to a public `pkg/`
+   API, per the README's "As a library" section — the README already
+   invites this on request but nothing's moved yet.
+2. A saved-config library/gallery in the web UI (list, re-load, re-run a
+   previously saved `AttackConfig` from `builder.html`, rather than only
+   "Preview JSON" + "Load testserver example") — `internal/config`'s
+   `LoadFile` already does the hard part for the CLI side; this would be
+   the web equivalent.
+3. `internal/payload` has four generator types; Burp Intruder also has a
+   "Character substitution" / "Illegal Unicode" / date-range payload type
+   historically — worth a look if API-compat with Burp's own payload list
+   becomes a goal, but not clearly needed yet.
 
 ## How to resume this project (e.g. if a session runs out of budget)
 
