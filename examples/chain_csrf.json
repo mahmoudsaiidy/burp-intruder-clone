@@ -1,0 +1,19 @@
+{
+  "template": "GET /login/secure?csrf={{csrf}}&username=admin&password=§pass§ HTTP/1.1\r\nHost: 127.0.0.1:8089\r\nUser-Agent: intruder-example\r\nAccept: */*\r\n\r\n",
+  "target": { "host": "127.0.0.1", "port": 8089 },
+  "mode": "sniper",
+  "generators": [
+    { "type": "wordlist", "words": ["wrongpass", "hunter2", "letmein"] }
+  ],
+  "matcher": { "type": "status", "op": "eq", "value": 200 },
+  "chain": [
+    {
+      "name": "csrf",
+      "raw": "GET /csrf HTTP/1.1\r\nHost: 127.0.0.1:8089\r\n\r\n",
+      "target": { "host": "127.0.0.1", "port": 8089 },
+      "extractor": { "type": "body_regex", "pattern": "token=(\\w+)" },
+      "placeholder": "{{csrf}}"
+    }
+  ],
+  "workers": 5
+}

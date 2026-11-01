@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
 
-[Quick start](#quick-start) · [Features](#features) · [Usage](#usage) · [Architecture](#architecture) · [Contributing](#contributing) · [Status](#project-status)
+[Quick start](#quick-start) · [Features](#features) · [Usage](#usage) · [Examples](#examples) · [Architecture](#architecture) · [Contributing](#contributing) · [Status](#project-status)
 
 </div>
 
@@ -30,6 +30,12 @@ core with a CLI and a web UI on top.
 
 ## Features
 
+- **A marker can go anywhere in the request** — `§...§` is found by
+  scanning the raw request text itself, not a fixed set of fields, so the
+  same engine that brute-forces a login's `password` field equally brute-
+  forces a URL path segment (directory/file discovery, à la gobuster/ffuf)
+  or a JSON/form body field, with no special mode needed. See
+  [Beyond logins: paths and bodies](#beyond-logins-paths-and-bodies).
 - **Four attack modes**, matching Burp's own semantics exactly:
   - **Sniper** — one marker varies at a time, others held at their original value.
   - **Battering ram** — a single payload broadcast into every marker at once.
@@ -93,10 +99,10 @@ still ahead.
 go run ./cmd/cli
 ```
 
-Wires a request template, a wordlist, the Sniper attack mode, the engine,
-and a `StatusMatcher` together, then prints a results table — fires six
-requests against a mock `/login` endpoint and flags the one that returns
-`200`:
+With no arguments, wires a request template, a wordlist, the Sniper attack
+mode, the engine, and a `StatusMatcher` together by hand, then prints a
+results table — fires six requests against a mock `/login` endpoint and
+flags the one that returns `200`:
 
 ```
 HIT    STATUS  PAYLOAD          LENGTH   TIME      ERROR
@@ -109,6 +115,18 @@ HIT    STATUS  PAYLOAD          LENGTH   TIME      ERROR
 
 done: 6 requests (1 flagged) in ...
 ```
+
+Given a path to a JSON `AttackConfig` instead, it runs that — same
+`internal/config.Run` wiring the web UI's `/ws/config` uses, so a config
+that works from one works from the other:
+
+```sh
+go run ./cmd/testserver &       # the target these examples attack
+go run ./cmd/cli examples/sniper.json
+```
+
+See [Examples](#examples) below for ready-to-run configs covering all four
+attack modes and a chain.
 
 ### Web UI
 
@@ -128,6 +146,72 @@ generator per marker (with optional processing rules), build a match rule,
 and optionally add chain stages — then run it, streamed the same way over
 `/ws/config`. "Load testserver example" fills in a working config against
 `go run ./cmd/testserver` to try it with nothing else to set up first.
+
+### Beyond logins: paths and bodies
+
+A `§marker§` is just a span of the raw request text — `internal/template`
+scans for it the same way wherever it appears, so there's no special mode
+for "attack the URL" vs. "attack a form field." The CLI/web UI demos and
+`examples/` all happen to attack login query params, but the same engine
+covers two other common uses just by moving where the marker sits:
+
+- **Directory/file discovery** — put the marker in the path and feed it a
+  wordlist, same idea as `gobuster`/`dirb`/`ffuf`:
+  ```
+  GET /§dir§ HTTP/1.1
+  Host: target
+  ```
+  Use a `length` or `body_regex` matcher to filter out a uniform 404/soft-
+  404 page so only genuine hits get flagged.
+- **Body brute-forcing** — put the marker in a POST/PUT body field
+  (JSON, form-encoded, whatever the target expects):
+  ```
+  POST /api/reset HTTP/1.1
+  Host: target
+  Content-Type: application/json
+  Content-Length: 17
+
+  {"token":"§t§"}
+  ```
+  **Caveat, confirmed by testing against the live code, not just reading
+  it:** `Content-Length` is read once, as written in the template, and
+  never recalculated after a payload is injected. This isn't just "wrong
+  header, server complains" — `http.Request.Body` is wrapped to the
+  *original* declared length, so a longer payload is **silently truncated
+  client-side before the request is even sent** (verified: a 17-byte
+  `Content-Length` with a 30-character payload injected sends exactly 17
+  bytes of body, cutting the payload off mid-string, no error raised
+  anywhere). A shorter payload instead leaves the connection waiting to
+  write bytes that never come. Until `internal/template.Build`
+  recalculates `Content-Length` after injection (not yet done — tracked in
+  `STATUS.md`), keep every payload the same byte length for a body marker,
+  or use a target that accepts `Transfer-Encoding: chunked` instead of a
+  fixed `Content-Length`.
+
+There isn't a wordlist-free / recursive / auto-calibrating directory-brute
+mode built in (unlike a dedicated tool such as `ffuf`) — you supply the
+wordlist and the matcher yourself, same as any other attack here.
+
+## Examples
+
+[`examples/`](./examples) has ready-to-run `AttackConfig` JSON files for
+`cmd/cli` (or paste their contents into `builder.html`'s "Preview JSON" /
+send flow), each targeting `go run ./cmd/testserver`'s default port
+(`:8089`):
+
+| File | Mode | Target endpoint | What it shows |
+| --- | --- | --- | --- |
+| [`sniper.json`](./examples/sniper.json) | Sniper | `/login` | one marker, a wordlist, flags the `200` |
+| [`pitchfork.json`](./examples/pitchfork.json) | Pitchfork | `/login/multi` | two independent markers (username + password) walked in lockstep |
+| [`cluster_bomb.json`](./examples/cluster_bomb.json) | Cluster bomb | `/login/multi` | the same two markers, full combinatorial product |
+| [`chain_csrf.json`](./examples/chain_csrf.json) | Sniper + chain | `/login/secure` (via `/csrf` first) | a setup stage fetches a CSRF token and feeds it into every attack request |
+
+`cmd/testserver` exposes all four endpoints these configs attack —
+`/login` (single field, the original demo target), `/login/multi`
+(independent username + password), `/csrf` (issues a token), and
+`/login/secure` (requires that token plus both credentials) — so Pitchfork,
+Cluster bomb, and chain support all have something real to run against
+outside of `go test`, not just the single-field Sniper demo.
 
 ### As a library
 
@@ -181,7 +265,10 @@ internal/
   engine/       worker pool, shared http.Client, rate limiter, result streaming
   match/        match/filter rules + value extraction
   chain/        multi-stage request chaining (extract a value, feed it into a later request)
-  testtarget/   the mock login handler cmd/testserver and the web demo both attack
+  testtarget/   mock login endpoints cmd/testserver and the web demo attack: a
+                single-field /login (the original demo target), a two-field
+                /login/multi (Pitchfork/Cluster bomb), and a /csrf + gated
+                /login/secure pair (chain support)
   config/       JSON attack-config spec (template/target/mode/generators/matcher/chain) + build/run orchestrator
   server/       web UI backend: HTTP+WS, hand-rolled stdlib WebSocket layer
 web/            static frontend — index.html (demo attack) + builder.html (configure & run your own), no build step

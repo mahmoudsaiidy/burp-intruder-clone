@@ -1,0 +1,11 @@
+{
+  "template": "GET /login/multi?username=§user§&password=§pass§ HTTP/1.1\r\nHost: 127.0.0.1:8089\r\nUser-Agent: intruder-example\r\nAccept: */*\r\n\r\n",
+  "target": { "host": "127.0.0.1", "port": 8089 },
+  "mode": "pitchfork",
+  "generators": [
+    { "type": "wordlist", "words": ["root", "admin"] },
+    { "type": "wordlist", "words": ["toor", "hunter2"] }
+  ],
+  "matcher": { "type": "status", "op": "eq", "value": 200 },
+  "workers": 5
+}

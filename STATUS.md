@@ -441,23 +441,98 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       clean; `go test -race ./...` unaffected (no Go files changed — this
       was a `web/`-only addition).
 
+- [x] **Both "optional, quick" items above, done together** — `internal/testtarget`
+      gained three new endpoints alongside the original, byte-for-byte
+      unchanged `/login` (`LoginFunc`, still the original demo target):
+      - `/login/multi` (`MultiFieldLoginFunc`) — independent `username` +
+        `password` query params (`CorrectUsername = "admin"`,
+        `CorrectPassword` reused), `200` only if both are right. Gives
+        Pitchfork/Cluster bomb a real two-marker target to run against
+        outside of `httptest`.
+      - `/csrf` (`CSRFFunc`) — returns `token=<CSRFToken>` in the body,
+        the exact `token=(\w+)` shape `internal/chain`'s and
+        `internal/config`'s own tests already extract with a body-regex
+        extractor, so an example chain config can reuse the same pattern.
+      - `/login/secure` (`SecureLoginFunc`) — like `/login/multi` but also
+        requires `csrf=<CSRFToken>`, i.e. a login that genuinely can't be
+        attacked in one request. Exercises `internal/chain` +
+        `internal/config`'s chain support (fetch the token, then feed it
+        forward) against a real standalone target.
+      - `Mux()` — combines all four endpoints (including the original
+        `/login`) onto one `http.Handler`; `cmd/testserver` now serves
+        this instead of just `LoginHandler()`, and logs all four routes on
+        startup. `internal/server`'s hardcoded demo deliberately keeps
+        using `LoginHandler()` (just `/login`) unchanged, so its exact
+        6-requests/1-hit demo result is untouched.
+      - `internal/testtarget` gained its first test file
+        (`testtarget_test.go`) — table-driven coverage of every endpoint's
+        status-code branches, plus `TestMuxKeepsSingleFieldLoginUnchanged`
+        guarding the compatibility promise `LoginFunc`'s doc comment
+        makes. Previously this package had zero tests.
+      - `examples/` — four ready-to-run `AttackConfig` JSON files
+        (`sniper.json`, `pitchfork.json`, `cluster_bomb.json`,
+        `chain_csrf.json`), one per attack mode plus the chain case, each
+        targeting `cmd/testserver`'s default port. Verified live: built
+        `cmd/testserver` and `cmd/cli` as real binaries, ran the test
+        target, and fed `cmd/cli` each example — every one produces
+        exactly one flagged `200` hit among the rest `401`s, matching each
+        config's intended one correct credential/pair/chain value.
+        README gained an "Examples" section documenting all four
+        alongside the new testtarget endpoints.
+      `go build ./...`, `go vet ./...`, `gofmt -l .` (clean), and
+      `go test -race ./...` all pass, `internal/testtarget` included.
+
+## Known bug (found while documenting marker-in-body usage)
+
+**`internal/template.Build` does not recalculate `Content-Length` after
+injecting payload values**, so a marker placed in a request *body* (as
+opposed to the URL/query/headers, where this has no effect) silently
+corrupts the request whenever the payload's byte length differs from
+whatever `Content-Length` was written in the template.
+
+Confirmed live (not just by reading the code): built a template with
+`Content-Length: 17` and a body `{"token":"§t§"}`, then called `Build` with
+a 30-character payload. `req.ContentLength` stayed `17`, and reading
+`req.Body` back returned exactly `{"token":"a_much_` (17 bytes) — the
+payload is **silently truncated client-side**, before the request is even
+sent, not rejected or flagged anywhere. A payload shorter than the
+original placeholder would instead leave `Content-Length` promising bytes
+the body never supplies.
+
+This is a real gap, not just a doc caveat (README's new "Beyond logins:
+paths and bodies" section under Usage documents the workaround — same-
+length payloads, or a target that accepts chunked encoding — but the
+underlying behavior should be fixed, not just documented around).
+
+**Suggested fix, next session:** in `Template.Build` (`internal/template/parser.go`),
+after `Inject` resolves `values` into `resolved` but before
+`http.ReadRequest` parses it, detect whether any marker fell inside the
+body (i.e. after the blank-line header/body boundary) and, if so,
+recompute `Content-Length` from the actual resolved body length before
+parsing — or, simpler, let `http.ReadRequest` parse normally and then
+override `req.ContentLength` (and the `Content-Length` header text) from
+`len(bodyBytes)` whenever a `Content-Length` header is present at all,
+regardless of where the marker was (harmless no-op when nothing in the
+body changed). Needs a test mirroring the repro above, plus one proving a
+header/query-only marker still leaves `Content-Length` untouched when the
+body itself didn't change size.
+
 ## Next step
 
-1. **(Optional, quick)** Give `cmd/testserver` a second query field (e.g.
-   `username`) alongside `password`, matching the two-field mock server
-   `internal/config`'s own Pitchfork test already spins up ad hoc — would
-   let `cmd/testserver` (the standalone dev process, not just test code)
-   exercise Pitchfork/Cluster bomb/NumericRange/BruteForce/Chain-wrapped
-   generators too, the same way `cmd/cli path/to/config.json` already
-   proved Sniper live. Still optional/follow-up, not a blocker.
-2. **(Optional, quick)** Give `cmd/testserver`/`internal/testtarget` a
-   `/csrf`-style endpoint that `/login` requires a valid token from, then
-   add an example chain config (or wire one into `cmd/cli`'s own demo) so
-   `internal/chain` + `internal/config`'s chain support can be exercised
-   against the standalone dev server, not just `httptest`. The mechanism
-   is already proven twice over (`internal/chain`'s own tests, and
-   `internal/config/run_test.go`'s `TestRun_WithChain`) — this would just
-   be a third, more manual way to poke at it.
+1. **Fix the `Content-Length` bug above** — the most concrete, correctness-
+   affecting item currently open.
+2. Promote the core engine packages out of `internal/` to a public `pkg/`
+   API, per the README's "As a library" section — the README already
+   invites this on request but nothing's moved yet.
+3. A saved-config library/gallery in the web UI (list, re-load, re-run a
+   previously saved `AttackConfig` from `builder.html`, rather than only
+   "Preview JSON" + "Load testserver example") — `internal/config`'s
+   `LoadFile` already does the hard part for the CLI side; this would be
+   the web equivalent.
+4. `internal/payload` has four generator types; Burp Intruder also has a
+   "Character substitution" / "Illegal Unicode" / date-range payload type
+   historically — worth a look if API-compat with Burp's own payload list
+   becomes a goal, but not clearly needed yet.
 
 ## How to resume this project (e.g. if a session runs out of budget)
 
