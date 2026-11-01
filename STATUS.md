@@ -392,31 +392,65 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       the UI half is its own, more purely front-end-design task — see
       Next step below.
 
+- [x] **Request-builder UI** — `web/builder.html`, a new page alongside the
+      existing demo (`web/index.html`, which now links to it). Pure
+      client-side vanilla JS, no build step, matching the rest of `web/`'s
+      stack decision: a target section (host/port/TLS), a raw-template
+      textarea with a live §marker§ counter, a mode picker, a
+      per-marker generator editor (wordlist / numeric range / brute force,
+      each with an add-a-rule UI for the processing-rule chain) that grows
+      or shrinks to the exact count `Mode` needs (1 for Sniper/Battering
+      ram, one per detected marker for Pitchfork/Cluster bomb), a
+      match-rule builder (any number of conditions combined with AND/OR,
+      each with an optional NOT), and a collapsible chain-stage editor
+      (name/raw/target/extractor/placeholder, repeatable) — all assembled
+      client-side into one `AttackConfig` JSON document and run by opening
+      `/ws/config` and sending it as the first frame, rendering results
+      into the same live table style `index.html`'s demo already used.
+      "Preview JSON" shows the exact document before sending (useful for
+      saving it as a `cmd/cli path/to/config.json` file, too); "Load
+      testserver example" fills in a working Sniper config against
+      `cmd/testserver`'s default port, for a first run with nothing else
+      to configure.
+      - **Found and fixed a real trap in the process**: a hand-typed
+        template missing its terminating blank line (`http.ReadRequest`
+        requires headers end with CRLF CRLF) makes `template.Build` fail
+        for every job, which `attack.Jobs` treats as a "setup problem,
+        not a per-request condition" and silently stops the whole job
+        sequence — `/ws/config`'s `"started"` message still reports the
+        correct expected total (computed independently from marker ×
+        generator counts), but zero `"result"` messages ever follow and
+        the run just reports `done` with 0/0. Caught this by actually
+        running the built page end-to-end against a live `cmd/testserver`
+        (headless-browser-driven, not just unit-level), not from reading
+        the code. The builder now normalizes every outgoing template
+        (main attack and each chain stage) to always end in a blank line
+        before sending, rather than silently producing an empty-looking
+        run the first time someone forgets it.
+      Verified live: headless-browser-driven runs against a real
+      `cmd/server` + `cmd/testserver` pair — a Sniper run through the
+      builder flags `hunter2` as the one hit among 5 requests (matching
+      the hardcoded demo's own known-good result); mode switching
+      regenerates the right generator-block count (1 for
+      Sniper/Battering ram, N for Pitchfork/Cluster bomb against an
+      N-marker template); rule-chip add/remove, multi-condition
+      AND/OR matcher building (and the single-condition and
+      zero-condition/omitted-matcher cases), and chain-stage add both
+      render and serialize correctly into the JSON `AttackConfig` shape
+      `internal/config` expects. `gofmt -l .` and `go vet ./...` both
+      clean; `go test -race ./...` unaffected (no Go files changed — this
+      was a `web/`-only addition).
+
 ## Next step
 
-1. **Request-builder UI (the natural next meaty step)**: `internal/config`
-   and `/ws/config` (done above) can build and run any attack the four
-   modes support, but only if something hands them JSON. Build a page in
-   `web/` — a textarea for the raw request template, a way to mark
-   §markers§ (or just let the person type them directly, simplest first
-   cut), a mode picker, a generator editor per marker (wordlist textarea /
-   numeric range / brute force, with an optional rule-chain picker), a
-   match-rule builder, and optionally a chain-stage editor — that
-   assembles an `AttackConfig` JSON document client-side and opens
-   `/ws/config` with it, rendering the same live results table `/ws`'s
-   demo already does. Doesn't need to be pretty on the first pass; it
-   needs to prove a person can configure and run their *own* attack
-   end-to-end through the browser, which nothing does yet. No design
-   questions left on the backend side — this is UI construction against
-   an already-tested API.
-2. **(Optional, quick)** Give `cmd/testserver` a second query field (e.g.
+1. **(Optional, quick)** Give `cmd/testserver` a second query field (e.g.
    `username`) alongside `password`, matching the two-field mock server
    `internal/config`'s own Pitchfork test already spins up ad hoc — would
    let `cmd/testserver` (the standalone dev process, not just test code)
    exercise Pitchfork/Cluster bomb/NumericRange/BruteForce/Chain-wrapped
    generators too, the same way `cmd/cli path/to/config.json` already
    proved Sniper live. Still optional/follow-up, not a blocker.
-3. **(Optional, quick)** Give `cmd/testserver`/`internal/testtarget` a
+2. **(Optional, quick)** Give `cmd/testserver`/`internal/testtarget` a
    `/csrf`-style endpoint that `/login` requires a valid token from, then
    add an example chain config (or wire one into `cmd/cli`'s own demo) so
    `internal/chain` + `internal/config`'s chain support can be exercised

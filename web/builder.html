@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Intruder — attack builder</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14161a;
+    --panel: #1c1f26;
+    --panel2: #20242c;
+    --border: #2b2f3a;
+    --text: #e4e6eb;
+    --muted: #8a8f9c;
+    --accent: #e0963c;
+    --ok: #3fb97f;
+    --err: #e05a4e;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem;
+    max-width: 920px;
+  }
+  h1 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0 0 0.25rem;
+  }
+  h2 {
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    margin: 0 0 0.75rem;
+  }
+  p.sub {
+    color: var(--muted);
+    margin: 0 0 1.5rem;
+    font-size: 0.85rem;
+  }
+  a { color: var(--accent); }
+  nav { margin-bottom: 1.25rem; font-size: 0.8rem; }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.1rem;
+    margin-bottom: 1rem;
+  }
+  label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 0.25rem;
+  }
+  .row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 140px; }
+  input[type=text], input[type=number], textarea, select {
+    width: 100%;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    padding: 0.4rem 0.5rem;
+    font: inherit;
+    font-size: 0.85rem;
+  }
+  textarea { resize: vertical; min-height: 4.5em; }
+  textarea.template { min-height: 9em; }
+  .field { margin-bottom: 0.75rem; }
+  .inline { display: flex; align-items: center; gap: 0.4rem; }
+  .inline label { margin: 0; }
+  button {
+    background: var(--accent);
+    color: #1a1200;
+    border: none;
+    border-radius: 4px;
+    padding: 0.5rem 1rem;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  button.secondary {
+    background: var(--panel2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button.small {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.75rem;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .hint { color: var(--muted); font-size: 0.75rem; margin-top: 0.3rem; }
+  .gen-block, .stage-block, .cond-block {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem;
+    margin-bottom: 0.6rem;
+    background: var(--panel2);
+  }
+  .gen-block h3, .stage-block h3 {
+    margin: 0 0 0.6rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .rule-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.15rem 0.6rem;
+    font-size: 0.75rem;
+    margin: 0.2rem 0.3rem 0.2rem 0;
+  }
+  .rule-chip button {
+    background: none;
+    color: var(--err);
+    padding: 0;
+    font-weight: 700;
+    font-size: 0.8rem;
+  }
+  .actions { display: flex; gap: 0.6rem; margin: 1.2rem 0; flex-wrap: wrap; }
+  #status {
+    color: var(--muted);
+    font-size: 0.85rem;
+    min-height: 1.2em;
+    margin-bottom: 0.75rem;
+  }
+  #jsonPreview {
+    display: none;
+    white-space: pre-wrap;
+    font-size: 0.75rem;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem;
+    max-height: 300px;
+    overflow: auto;
+    margin-top: 0.5rem;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+  th, td {
+    text-align: left;
+    padding: 0.4rem 0.7rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+  }
+  tr.hit { background: rgba(63, 185, 127, 0.12); }
+  tr.hit td:first-child { color: var(--ok); font-weight: 700; }
+  td.error { color: var(--err); }
+  details summary {
+    cursor: pointer;
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+  }
+</style>
+</head>
+<body>
+  <nav><a href="./index.html">&larr; demo attack</a></nav>
+  <h1>Intruder — attack builder</h1>
+  <p class="sub">
+    Compose your own request template, payloads, and match rule, then run it
+    live against a target you're authorized to test. Builds an
+    <code>AttackConfig</code> JSON document client-side and streams results
+    over <code>/ws/config</code> — the same backend <code>cmd/cli
+    path/to/config.json</code> uses.
+  </p>
+
+  <section>
+    <h2>Target</h2>
+    <div class="row">
+      <div class="field">
+        <label for="host">Host</label>
+        <input type="text" id="host" value="127.0.0.1" placeholder="127.0.0.1 or example.com">
+      </div>
+      <div class="field">
+        <label for="port">Port</label>
+        <input type="number" id="port" value="8089" min="0" max="65535">
+      </div>
+      <div class="field" style="flex: 0 0 auto; min-width: 100px;">
+        <label>&nbsp;</label>
+        <span class="inline"><input type="checkbox" id="useTls"><label for="useTls">Use TLS</label></span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Request template</h2>
+    <div class="field">
+      <label for="template">Raw HTTP request — wrap each injection point in §markers§</label>
+      <textarea id="template" class="template" spellcheck="false">GET /login?password=§pass§ HTTP/1.1
+Host: 127.0.0.1
+Connection: close
+
+</textarea>
+    </div>
+    <div class="hint" id="markerHint">0 marker(s) detected</div>
+    <div class="hint">
+      Headers must end with a blank line, like a real HTTP request — Run
+      adds one automatically if you forget it.
+    </div>
+  </section>
+
+  <section>
+    <h2>Attack mode</h2>
+    <div class="field">
+      <select id="mode">
+        <option value="sniper">Sniper — one marker at a time, one generator</option>
+        <option value="battering_ram">Battering ram — same payload into every marker, one generator</option>
+        <option value="pitchfork">Pitchfork — one generator per marker, walked in lockstep</option>
+        <option value="cluster_bomb">Cluster bomb — one generator per marker, full combination</option>
+      </select>
+    </div>
+  </section>
+
+  <section>
+    <h2>Payload generators</h2>
+    <div id="generators"></div>
+    <div class="hint" id="genHint"></div>
+  </section>
+
+  <section>
+    <h2>Match / flag rule <span style="font-weight:400; text-transform:none; color:var(--muted);">(optional)</span></h2>
+    <div class="field">
+      <label>Combine conditions with</label>
+      <select id="matchCombinator">
+        <option value="or">OR — flag if any condition matches</option>
+        <option value="and">AND — flag only if every condition matches</option>
+      </select>
+    </div>
+    <div id="conditions"></div>
+    <button type="button" class="secondary small" id="addCondition">+ add condition</button>
+  </section>
+
+  <section>
+    <details>
+      <summary>Chain stages (optional) — setup requests run before the attack, e.g. a CSRF token fetch</summary>
+      <div id="stages"></div>
+      <button type="button" class="secondary small" id="addStage">+ add stage</button>
+    </details>
+  </section>
+
+  <section>
+    <h2>Run options</h2>
+    <div class="row">
+      <div class="field"><label for="workers">Workers</label><input type="number" id="workers" value="5" min="1"></div>
+      <div class="field"><label for="rate">Rate / sec (0 = unlimited)</label><input type="number" id="rate" value="0" min="0" step="any"></div>
+      <div class="field"><label for="jitter">Jitter max (ms)</label><input type="number" id="jitter" value="0" min="0"></div>
+      <div class="field"><label for="timeout">Timeout (s)</label><input type="number" id="timeout" value="30" min="1"></div>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button type="button" id="runBtn">Run attack</button>
+    <button type="button" class="secondary" id="previewBtn">Preview JSON</button>
+    <button type="button" class="secondary" id="loadExampleBtn">Load testserver example</button>
+  </div>
+
+  <pre id="jsonPreview"></pre>
+
+  <div id="status"></div>
+  <table>
+    <thead>
+      <tr><th></th><th>Status</th><th>Length</th><th>Time (ms)</th><th>Payload</th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <script>
+    // ---------- helpers ----------
+    function el(tag, attrs, ...children) {
+      const e = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs || {})) {
+        if (k === 'class') e.className = v;
+        else if (k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2), v);
+        else if (v !== undefined && v !== null) e.setAttribute(k, v);
+      }
+      for (const c of children) {
+        if (c === undefined || c === null) continue;
+        e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+      }
+      return e;
+    }
+
+    function escapeHTML(s) {
+      return String(s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    // ensureTrailingBlankLine makes sure a raw HTTP request template ends
+    // in a blank line, the way a real HTTP request must (headers are
+    // terminated by CRLF CRLF). Without it, the server's
+    // template.Template.Build fails to parse the resolved text as HTTP and
+    // the whole job sequence for that template is silently skipped — total
+    // still reports the expected request count, but zero results ever
+    // arrive. Easy to forget when typing a template by hand, so Run fixes
+    // it up rather than making every user hit that trap once first.
+    function ensureTrailingBlankLine(raw) {
+      const norm = raw.replace(/\r\n/g, '\n');
+      if (norm.endsWith('\n\n')) return raw;
+      if (norm.endsWith('\n')) return raw + '\n';
+      return raw + '\n\n';
+    }
+
+    function countMarkers(raw) {
+      let count = 0, open = false;
+      for (const ch of raw) {
+        if (ch === '§') { // §
+          if (open) { count++; open = false; } else { open = true; }
+        }
+      }
+      return { count, unmatched: open };
+    }
+
+    // ---------- state ----------
+    let generators = [{ type: 'wordlist', words: 'wrong1\nhunter2\nwrong2', from: 0, to: 10, step: 1, minDigits: 0, charset: 'abc', minLen: 1, maxLen: 2, rules: [] }];
+    let conditions = [{ type: 'status', op: 'eq', value: 200, pattern: '', header: '', not: false }];
+    let stages = [];
+
+    const templateEl = document.getElementById('template');
+    const modeEl = document.getElementById('mode');
+    const markerHint = document.getElementById('markerHint');
+    const genHint = document.getElementById('genHint');
+
+    function neededGeneratorCount() {
+      const { count } = countMarkers(templateEl.value);
+      if (modeEl.value === 'pitchfork' || modeEl.value === 'cluster_bomb') {
+        return Math.max(count, 1);
+      }
+      return 1; // sniper / battering_ram
+    }
+
+    function syncGeneratorCount() {
+      const needed = neededGeneratorCount();
+      while (generators.length < needed) {
+        generators.push({ type: 'wordlist', words: '', from: 0, to: 10, step: 1, minDigits: 0, charset: 'abc', minLen: 1, maxLen: 2, rules: [] });
+      }
+      while (generators.length > needed) generators.pop();
+    }
+
+    function refreshMarkerHint() {
+      const { count, unmatched } = countMarkers(templateEl.value);
+      markerHint.textContent = unmatched
+        ? `${count} marker(s) detected — unmatched § delimiter, fix before running`
+        : `${count} marker(s) detected`;
+      markerHint.style.color = unmatched ? 'var(--err)' : 'var(--muted)';
+    }
+
+    // ---------- generators UI ----------
+    const generatorsEl = document.getElementById('generators');
+
+    function renderGenerators() {
+      generatorsEl.innerHTML = '';
+      const needed = neededGeneratorCount();
+      genHint.textContent = (modeEl.value === 'pitchfork' || modeEl.value === 'cluster_bomb')
+        ? `${needed} generator(s) required — one per marker, same order as the template`
+        : `1 generator required — its values cycle across ${modeEl.value === 'sniper' ? 'each marker in turn' : 'every marker at once'}`;
+
+      generators.forEach((g, i) => {
+        const block = el('div', { class: 'gen-block' });
+        block.appendChild(el('h3', {}, (needed > 1 ? `Marker ${i + 1} generator` : 'Generator')));
+
+        const typeSel = el('select', { onchange: (e) => { g.type = e.target.value; renderGenerators(); } },
+          ...['wordlist', 'numeric_range', 'brute_force'].map(t =>
+            el('option', { value: t, ...(g.type === t ? { selected: 'selected' } : {}) }, t)));
+        block.appendChild(el('div', { class: 'field' }, el('label', {}, 'Type'), typeSel));
+
+        if (g.type === 'wordlist') {
+          const ta = el('textarea', {
+            placeholder: 'one payload per line',
+            oninput: (e) => { g.words = e.target.value; },
+          }, g.words);
+          block.appendChild(el('div', { class: 'field' }, el('label', {}, 'Words (one per line)'), ta));
+        } else if (g.type === 'numeric_range') {
+          const row = el('div', { class: 'row' });
+          const mk = (label, key, val) => el('div', { class: 'field' }, el('label', {}, label),
+            el('input', { type: 'number', value: val, oninput: (e) => { g[key] = e.target.value; } }));
+          row.appendChild(mk('From', 'from', g.from));
+          row.appendChild(mk('To', 'to', g.to));
+          row.appendChild(mk('Step', 'step', g.step));
+          row.appendChild(mk('Min digits (padding)', 'minDigits', g.minDigits));
+          block.appendChild(row);
+        } else if (g.type === 'brute_force') {
+          const row = el('div', { class: 'row' });
+          row.appendChild(el('div', { class: 'field' }, el('label', {}, 'Charset'),
+            el('input', { type: 'text', value: g.charset, oninput: (e) => { g.charset = e.target.value; } })));
+          row.appendChild(el('div', { class: 'field' }, el('label', {}, 'Min length'),
+            el('input', { type: 'number', value: g.minLen, min: '1', oninput: (e) => { g.minLen = e.target.value; } })));
+          row.appendChild(el('div', { class: 'field' }, el('label', {}, 'Max length'),
+            el('input', { type: 'number', value: g.maxLen, min: '1', oninput: (e) => { g.maxLen = e.target.value; } })));
+          block.appendChild(row);
+        }
+
+        // rule chain
+        const ruleWrap = el('div', { class: 'field' });
+        ruleWrap.appendChild(el('label', {}, 'Processing rules (applied in order)'));
+        const chips = el('div', {});
+        g.rules.forEach((r, ri) => {
+          chips.appendChild(el('span', { class: 'rule-chip' },
+            r.value ? `${r.type}: ${r.value}` : r.type,
+            el('button', { type: 'button', onclick: () => { g.rules.splice(ri, 1); renderGenerators(); } }, '×')));
+        });
+        ruleWrap.appendChild(chips);
+
+        const ruleAdd = el('div', { class: 'row' });
+        const ruleTypeSel = el('select', {},
+          ...['url_encode', 'base64_encode', 'prefix', 'suffix', 'upper', 'lower'].map(t => el('option', { value: t }, t)));
+        const ruleValInput = el('input', { type: 'text', placeholder: 'value (prefix/suffix only)' });
+        const addRuleBtn = el('button', {
+          type: 'button', class: 'secondary small',
+          onclick: () => {
+            g.rules.push({ type: ruleTypeSel.value, value: ruleValInput.value });
+            renderGenerators();
+          },
+        }, '+ add rule');
+        ruleAdd.appendChild(el('div', { style: 'flex:1' }, ruleTypeSel));
+        ruleAdd.appendChild(el('div', { style: 'flex:1' }, ruleValInput));
+        ruleAdd.appendChild(el('div', { style: 'flex:0 0 auto' }, addRuleBtn));
+        ruleWrap.appendChild(ruleAdd);
+
+        block.appendChild(ruleWrap);
+        generatorsEl.appendChild(block);
+      });
+    }
+
+    templateEl.addEventListener('input', () => { refreshMarkerHint(); syncGeneratorCount(); renderGenerators(); });
+    modeEl.addEventListener('change', () => { syncGeneratorCount(); renderGenerators(); });
+
+    // ---------- match conditions UI ----------
+    const conditionsEl = document.getElementById('conditions');
+    const matchTypesNeedingOp = new Set(['status', 'length']);
+    const matchTypesNeedingPattern = new Set(['body_regex', 'header_regex']);
+
+    function renderConditions() {
+      conditionsEl.innerHTML = '';
+      conditions.forEach((c, i) => {
+        const block = el('div', { class: 'cond-block' });
+        const row1 = el('div', { class: 'row' });
+
+        const typeSel = el('select', { onchange: (e) => { c.type = e.target.value; renderConditions(); } },
+          ...['status', 'length', 'body_regex', 'header_regex', 'error'].map(t =>
+            el('option', { value: t, ...(c.type === t ? { selected: 'selected' } : {}) }, t)));
+        row1.appendChild(el('div', { class: 'field' }, el('label', {}, 'Condition'), typeSel));
+
+        if (matchTypesNeedingOp.has(c.type)) {
+          const opSel = el('select', { onchange: (e) => { c.op = e.target.value; } },
+            ...[['eq', '== equal'], ['ne', '!= not equal'], ['lt', '< less than'], ['gt', '> greater than'],
+                ['le', '<= less or equal'], ['ge', '>= greater or equal']].map(([v, l]) =>
+              el('option', { value: v, ...(c.op === v ? { selected: 'selected' } : {}) }, l)));
+          row1.appendChild(el('div', { class: 'field' }, el('label', {}, 'Operator'), opSel));
+          row1.appendChild(el('div', { class: 'field' }, el('label', {}, c.type === 'status' ? 'Status code' : 'Response length'),
+            el('input', { type: 'number', value: c.value, oninput: (e) => { c.value = e.target.value; } })));
+        }
+        if (matchTypesNeedingPattern.has(c.type)) {
+          row1.appendChild(el('div', { class: 'field', style: 'flex: 2;' }, el('label', {}, 'Regex pattern'),
+            el('input', { type: 'text', value: c.pattern, oninput: (e) => { c.pattern = e.target.value; } })));
+          if (c.type === 'header_regex') {
+            row1.appendChild(el('div', { class: 'field' }, el('label', {}, 'Header name'),
+              el('input', { type: 'text', value: c.header, oninput: (e) => { c.header = e.target.value; } })));
+          }
+        }
+        block.appendChild(row1);
+
+        const row2 = el('div', { class: 'inline' });
+        const notCb = el('input', { type: 'checkbox', id: `not-${i}`, onchange: (e) => { c.not = e.target.checked; } });
+        if (c.not) notCb.setAttribute('checked', 'checked');
+        row2.appendChild(notCb);
+        row2.appendChild(el('label', { for: `not-${i}` }, 'negate (NOT)'));
+        row2.appendChild(el('button', {
+          type: 'button', class: 'secondary small', style: 'margin-left: auto;',
+          onclick: () => { conditions.splice(i, 1); renderConditions(); },
+        }, 'remove condition'));
+        block.appendChild(row2);
+
+        conditionsEl.appendChild(block);
+      });
+    }
+
+    document.getElementById('addCondition').addEventListener('click', () => {
+      conditions.push({ type: 'status', op: 'eq', value: 200, pattern: '', header: '', not: false });
+      renderConditions();
+    });
+
+    // ---------- chain stages UI ----------
+    const stagesEl = document.getElementById('stages');
+
+    function renderStages() {
+      stagesEl.innerHTML = '';
+      stages.forEach((s, i) => {
+        const block = el('div', { class: 'stage-block' });
+        block.appendChild(el('h3', {}, `Stage ${i + 1}`));
+
+        const row1 = el('div', { class: 'row' });
+        row1.appendChild(el('div', { class: 'field' }, el('label', {}, 'Name'),
+          el('input', { type: 'text', value: s.name, oninput: (e) => { s.name = e.target.value; } })));
+        row1.appendChild(el('div', { class: 'field' }, el('label', {}, 'Placeholder (e.g. {{csrf}})'),
+          el('input', { type: 'text', value: s.placeholder, oninput: (e) => { s.placeholder = e.target.value; } })));
+        block.appendChild(row1);
+
+        block.appendChild(el('div', { class: 'field' }, el('label', {}, 'Raw request'),
+          el('textarea', { oninput: (e) => { s.raw = e.target.value; } }, s.raw)));
+
+        const row2 = el('div', { class: 'row' });
+        row2.appendChild(el('div', { class: 'field' }, el('label', {}, 'Target host'),
+          el('input', { type: 'text', value: s.host, oninput: (e) => { s.host = e.target.value; } })));
+        row2.appendChild(el('div', { class: 'field' }, el('label', {}, 'Target port'),
+          el('input', { type: 'number', value: s.port, oninput: (e) => { s.port = e.target.value; } })));
+        const tlsId = `stage-tls-${i}`;
+        const tlsCb = el('input', { type: 'checkbox', id: tlsId, onchange: (e) => { s.useTls = e.target.checked; } });
+        if (s.useTls) tlsCb.setAttribute('checked', 'checked');
+        row2.appendChild(el('div', { class: 'field', style: 'flex: 0 0 auto;' }, el('label', {}, ' '),
+          el('div', { class: 'inline' }, tlsCb, el('label', { for: tlsId }, 'TLS'))));
+        block.appendChild(row2);
+
+        const row3 = el('div', { class: 'row' });
+        const extTypeSel = el('select', { onchange: (e) => { s.extractorType = e.target.value; renderStages(); } },
+          ...['body_regex', 'header_regex'].map(t => el('option', { value: t, ...(s.extractorType === t ? { selected: 'selected' } : {}) }, t)));
+        row3.appendChild(el('div', { class: 'field' }, el('label', {}, 'Extractor'), extTypeSel));
+        row3.appendChild(el('div', { class: 'field', style: 'flex: 2;' }, el('label', {}, 'Extract pattern (first capture group, or whole match)'),
+          el('input', { type: 'text', value: s.extractorPattern, oninput: (e) => { s.extractorPattern = e.target.value; } })));
+        if (s.extractorType === 'header_regex') {
+          row3.appendChild(el('div', { class: 'field' }, el('label', {}, 'Header name'),
+            el('input', { type: 'text', value: s.extractorHeader, oninput: (e) => { s.extractorHeader = e.target.value; } })));
+        }
+        block.appendChild(row3);
+
+        block.appendChild(el('button', {
+          type: 'button', class: 'secondary small',
+          onclick: () => { stages.splice(i, 1); renderStages(); },
+        }, 'remove stage'));
+
+        stagesEl.appendChild(block);
+      });
+    }
+
+    document.getElementById('addStage').addEventListener('click', () => {
+      stages.push({
+        name: `stage${stages.length + 1}`, raw: '', placeholder: '',
+        host: document.getElementById('host').value, port: 0, useTls: false,
+        extractorType: 'body_regex', extractorPattern: '', extractorHeader: '',
+      });
+      renderStages();
+    });
+
+    // ---------- build AttackConfig JSON ----------
+    function num(v, fallback) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    function buildGeneratorSpec(g) {
+      const spec = { type: g.type };
+      if (g.type === 'wordlist') {
+        spec.words = g.words.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+      } else if (g.type === 'numeric_range') {
+        spec.from = num(g.from, 0);
+        spec.to = num(g.to, 0);
+        spec.step = num(g.step, 1);
+        spec.min_digits = num(g.minDigits, 0);
+      } else if (g.type === 'brute_force') {
+        spec.charset = g.charset;
+        spec.min_len = num(g.minLen, 1);
+        spec.max_len = num(g.maxLen, 1);
+      }
+      if (g.rules && g.rules.length > 0) {
+        spec.rules = g.rules.map(r => ({ type: r.type, value: r.value || undefined }));
+      }
+      return spec;
+    }
+
+    function buildConditionSpec(c) {
+      let spec;
+      if (matchTypesNeedingOp.has(c.type)) {
+        spec = { type: c.type, op: c.op, value: num(c.value, 0) };
+      } else if (matchTypesNeedingPattern.has(c.type)) {
+        spec = { type: c.type, pattern: c.pattern };
+        if (c.type === 'header_regex') spec.header = c.header;
+      } else {
+        spec = { type: c.type };
+      }
+      if (c.not) return { type: 'not', child: spec };
+      return spec;
+    }
+
+    function buildMatcherSpec() {
+      if (conditions.length === 0) return undefined;
+      if (conditions.length === 1) return buildConditionSpec(conditions[0]);
+      return { type: document.getElementById('matchCombinator').value, children: conditions.map(buildConditionSpec) };
+    }
+
+    function buildStageSpec(s) {
+      const extractor = { type: s.extractorType, pattern: s.extractorPattern };
+      if (s.extractorType === 'header_regex') extractor.header = s.extractorHeader;
+      const stage = {
+        name: s.name,
+        raw: ensureTrailingBlankLine(s.raw),
+        target: { host: s.host, port: num(s.port, 0), use_tls: !!s.useTls },
+        extractor,
+      };
+      if (s.placeholder) stage.placeholder = s.placeholder;
+      return stage;
+    }
+
+    function buildConfig() {
+      syncGeneratorCount();
+      const cfg = {
+        template: ensureTrailingBlankLine(templateEl.value),
+        target: {
+          host: document.getElementById('host').value,
+          port: num(document.getElementById('port').value, 0),
+          use_tls: document.getElementById('useTls').checked,
+        },
+        mode: modeEl.value,
+        generators: generators.map(buildGeneratorSpec),
+        workers: num(document.getElementById('workers').value, 5),
+        rate_per_second: num(document.getElementById('rate').value, 0),
+        jitter_max_ms: num(document.getElementById('jitter').value, 0),
+        timeout_seconds: num(document.getElementById('timeout').value, 30),
+      };
+      const matcher = buildMatcherSpec();
+      if (matcher) cfg.matcher = matcher;
+      if (stages.length > 0) cfg.chain = stages.map(buildStageSpec);
+      return cfg;
+    }
+
+    // ---------- run / preview ----------
+    const runBtn = document.getElementById('runBtn');
+    const statusEl = document.getElementById('status');
+    const rowsEl = document.getElementById('rows');
+    const previewEl = document.getElementById('jsonPreview');
+
+    function addRow(msg) {
+      const tr = document.createElement('tr');
+      if (msg.hit) tr.className = 'hit';
+      const mark = msg.hit ? '★' : '';
+      if (msg.error) {
+        tr.innerHTML =
+          `<td>${mark}</td><td class="error" colspan="3">${escapeHTML(msg.error)}</td>` +
+          `<td>${escapeHTML(msg.payload || '')}</td>`;
+      } else {
+        tr.innerHTML =
+          `<td>${mark}</td><td>${msg.status}</td><td>${msg.length}</td>` +
+          `<td>${msg.duration_ms}</td><td>${escapeHTML(msg.payload || '')}</td>`;
+      }
+      rowsEl.appendChild(tr);
+    }
+
+    document.getElementById('previewBtn').addEventListener('click', () => {
+      previewEl.textContent = JSON.stringify(buildConfig(), null, 2);
+      previewEl.style.display = previewEl.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.getElementById('loadExampleBtn').addEventListener('click', () => {
+      document.getElementById('host').value = '127.0.0.1';
+      document.getElementById('port').value = '8089';
+      document.getElementById('useTls').checked = false;
+      templateEl.value = 'GET /login?password=§pass§ HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n';
+      modeEl.value = 'sniper';
+      generators = [{ type: 'wordlist', words: 'wrong1\nhunter2\nwrong2\nadmin\nletmein', from: 0, to: 10, step: 1, minDigits: 0, charset: 'abc', minLen: 1, maxLen: 2, rules: [] }];
+      conditions = [{ type: 'status', op: 'eq', value: 200, pattern: '', header: '', not: false }];
+      stages = [];
+      refreshMarkerHint();
+      syncGeneratorCount();
+      renderGenerators();
+      renderConditions();
+      renderStages();
+      statusEl.textContent = 'Example loaded. Start a target first — e.g. "go run ./cmd/testserver" — then Run.';
+    });
+
+    runBtn.addEventListener('click', () => {
+      const { unmatched } = countMarkers(templateEl.value);
+      if (unmatched) {
+        statusEl.textContent = 'Fix the unmatched § delimiter in the template before running.';
+        return;
+      }
+      const cfg = buildConfig();
+
+      runBtn.disabled = true;
+      rowsEl.innerHTML = '';
+      statusEl.textContent = 'connecting...';
+
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${location.host}/ws/config`);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify(cfg));
+        statusEl.textContent = 'running...';
+      };
+
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'started') {
+          statusEl.textContent = `running... 0 / ${msg.total}`;
+        } else if (msg.type === 'result') {
+          addRow(msg);
+          statusEl.textContent = `running... ${rowsEl.children.length}`;
+        } else if (msg.type === 'done') {
+          statusEl.textContent = `done: ${msg.total} requests, ${msg.hits} flagged`;
+          runBtn.disabled = false;
+        } else if (msg.type === 'error') {
+          statusEl.textContent = `error: ${msg.message}`;
+          runBtn.disabled = false;
+        }
+      };
+
+      ws.onerror = () => {
+        statusEl.textContent = 'connection error';
+        runBtn.disabled = false;
+      };
+
+      ws.onclose = () => { runBtn.disabled = false; };
+    });
+
+    // ---------- init ----------
+    refreshMarkerHint();
+    syncGeneratorCount();
+    renderGenerators();
+    renderConditions();
+    renderStages();
+  </script>
+</body>
+</html>

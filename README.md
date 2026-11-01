@@ -74,12 +74,16 @@ go run ./cmd/cli
 
 ```sh
 go run ./cmd/server
-# open http://localhost:8080 and click "Run demo attack"
+# open http://localhost:8080 and click "Run demo attack",
+# or open http://localhost:8080/builder.html to configure and run your own
 ```
 
-Both currently run a built-in demo attack (a Sniper run against a
-disposable local login endpoint) rather than taking your own request
-template yet — see [Project status](#project-status) for what's next.
+`cmd/cli` still only runs its built-in demo attack (a Sniper run against a
+disposable local login endpoint) unless you pass it a JSON config file (see
+[Usage](#usage) below). The web UI's `/builder.html` page lets you compose
+and run your own request template, payloads, attack mode, and match rule
+entirely in the browser — see [Project status](#project-status) for what's
+still ahead.
 
 ## Usage
 
@@ -116,6 +120,14 @@ Self-contained — it starts its own disposable local target per run, so
 there's nothing else to start first. Open `http://localhost:8080`, click
 **Run demo attack**, and watch results stream into a live table over a
 WebSocket at `/ws`.
+
+To run your *own* request template instead of the demo, open
+`http://localhost:8080/builder.html`: compose a raw HTTP request with
+§marker§ injection points, pick an attack mode, configure a payload
+generator per marker (with optional processing rules), build a match rule,
+and optionally add chain stages — then run it, streamed the same way over
+`/ws/config`. "Load testserver example" fills in a working config against
+`go run ./cmd/testserver` to try it with nothing else to set up first.
 
 ### As a library
 
@@ -159,8 +171,8 @@ first; see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 ## Project layout
 
 ```
-cmd/server/     entry point: HTTP+WS server, serves web/ and the /ws demo attack
-cmd/cli/        headless entry point — runs one hardcoded Sniper attack
+cmd/server/     entry point: HTTP+WS server, serves web/, the /ws demo attack, and /ws/config
+cmd/cli/        headless entry point — runs the hardcoded Sniper demo, or a JSON config file if given one
 cmd/testserver/ standalone process wrapping internal/testtarget, for manual dev use
 internal/
   template/     raw HTTP request parsing, §marker§ detection/injection
@@ -170,18 +182,18 @@ internal/
   match/        match/filter rules + value extraction
   chain/        multi-stage request chaining (extract a value, feed it into a later request)
   testtarget/   the mock login handler cmd/testserver and the web demo both attack
-  config/       save/load attack configs (not built yet)
+  config/       JSON attack-config spec (template/target/mode/generators/matcher/chain) + build/run orchestrator
   server/       web UI backend: HTTP+WS, hand-rolled stdlib WebSocket layer
-web/            static frontend (index.html, no build step)
+web/            static frontend — index.html (demo attack) + builder.html (configure & run your own), no build step
 ```
 
 ## Project status
 
 Core engine, all four attack modes, payload/match tooling, multi-stage
-chaining, and a first slice of the web UI are built and tested
-(`go test -race ./...` is green). Both interfaces currently run one
-hardcoded demo attack rather than taking a user-supplied request — real
-attack configuration is the next planned step.
+chaining, the JSON `internal/config` layer, and the web UI — including
+`builder.html`, a page to compose and run your own request template,
+payloads, and match rule entirely in the browser — are built and tested
+(`go test -race ./...` is green). See `STATUS.md` for what's still open.
 
 [`STATUS.md`](./STATUS.md) is the authoritative, continuously updated
 breakdown: what's done, what's deliberately deferred, and the exact next
