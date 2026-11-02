@@ -482,57 +482,63 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       `go build ./...`, `go vet ./...`, `gofmt -l .` (clean), and
       `go test -race ./...` all pass, `internal/testtarget` included.
 
-## Known bug (found while documenting marker-in-body usage)
+## Fixed bugs
 
-**`internal/template.Build` does not recalculate `Content-Length` after
-injecting payload values**, so a marker placed in a request *body* (as
-opposed to the URL/query/headers, where this has no effect) silently
-corrupts the request whenever the payload's byte length differs from
-whatever `Content-Length` was written in the template.
-
-Confirmed live (not just by reading the code): built a template with
-`Content-Length: 17` and a body `{"token":"§t§"}`, then called `Build` with
-a 30-character payload. `req.ContentLength` stayed `17`, and reading
-`req.Body` back returned exactly `{"token":"a_much_` (17 bytes) — the
-payload is **silently truncated client-side**, before the request is even
-sent, not rejected or flagged anywhere. A payload shorter than the
-original placeholder would instead leave `Content-Length` promising bytes
-the body never supplies.
-
-This is a real gap, not just a doc caveat (README's new "Beyond logins:
-paths and bodies" section under Usage documents the workaround — same-
-length payloads, or a target that accepts chunked encoding — but the
-underlying behavior should be fixed, not just documented around).
-
-**Suggested fix, next session:** in `Template.Build` (`internal/template/parser.go`),
-after `Inject` resolves `values` into `resolved` but before
-`http.ReadRequest` parses it, detect whether any marker fell inside the
-body (i.e. after the blank-line header/body boundary) and, if so,
-recompute `Content-Length` from the actual resolved body length before
-parsing — or, simpler, let `http.ReadRequest` parse normally and then
-override `req.ContentLength` (and the `Content-Length` header text) from
-`len(bodyBytes)` whenever a `Content-Length` header is present at all,
-regardless of where the marker was (harmless no-op when nothing in the
-body changed). Needs a test mirroring the repro above, plus one proving a
-header/query-only marker still leaves `Content-Length` untouched when the
-body itself didn't change size.
+- [x] **`internal/template.Build` now recalculates `Content-Length` after
+      injecting payload values.** Previously a marker placed in a request
+      *body* (as opposed to the URL/query/headers, where this has no
+      effect) silently corrupted the request whenever the payload's byte
+      length differed from whatever `Content-Length` was written in the
+      template — confirmed live before the fix: a template with
+      `Content-Length: 17` and a body `{"token":"§t§"}`, built with a
+      30-character payload, left `req.ContentLength` at `17` and
+      `req.Body` silently truncated to 17 bytes client-side, before the
+      request was even sent.
+      - Root cause was one layer deeper than "forgot to recompute":
+        `http.ReadRequest` parses the resolved text as a server would, so
+        it trusts the template's (possibly now-stale) `Content-Length`
+        header to decide how many bytes `req.Body` will ever yield — a
+        naive `io.ReadAll(req.Body)` after parsing hits that same stale
+        limit instead of exposing the problem. The fix pulls the real
+        body straight out of the `resolved` text `Inject` produced
+        (everything after the `\r\n\r\n` header/body boundary), not out
+        of `req.Body`, and uses that to override `req.ContentLength`, the
+        `Content-Length` header text, `req.Body`, and `req.GetBody` (so a
+        `Transport` retry/redirect that calls `GetBody` gets the correct
+        bytes too). Applied whenever a `Content-Length` header is present
+        at all, regardless of where the marker was — a no-op when the
+        body's length didn't change.
+      - Tests: `TestBuild_RecalculatesContentLengthForBodyMarker` mirrors
+        the exact repro above (asserts `req.ContentLength`, the header
+        text, `req.Body`'s full contents, and `req.GetBody`'s contents
+        all agree with the real resolved body).
+        `TestBuild_ContentLengthUntouchedWhenBodyUnchanged` guards against
+        the fix over-firing: a query-string marker with the body itself
+        unchanged still comes out byte-for-byte what it was before the
+        fix. `go test -race ./...` passes, `internal/template` included;
+        `gofmt -l .` and `go vet ./...` both clean.
+      README's "Beyond logins: paths and bodies" workaround note (same-
+      length payloads / chunked encoding) is now obsolete and should be
+      trimmed or reworded next time that section is touched, since the
+      underlying bug it was working around is fixed.
 
 ## Next step
 
-1. **Fix the `Content-Length` bug above** — the most concrete, correctness-
-   affecting item currently open.
-2. Promote the core engine packages out of `internal/` to a public `pkg/`
+1. Promote the core engine packages out of `internal/` to a public `pkg/`
    API, per the README's "As a library" section — the README already
    invites this on request but nothing's moved yet.
-3. A saved-config library/gallery in the web UI (list, re-load, re-run a
+2. A saved-config library/gallery in the web UI (list, re-load, re-run a
    previously saved `AttackConfig` from `builder.html`, rather than only
    "Preview JSON" + "Load testserver example") — `internal/config`'s
    `LoadFile` already does the hard part for the CLI side; this would be
    the web equivalent.
-4. `internal/payload` has four generator types; Burp Intruder also has a
+3. `internal/payload` has four generator types; Burp Intruder also has a
    "Character substitution" / "Illegal Unicode" / date-range payload type
    historically — worth a look if API-compat with Burp's own payload list
    becomes a goal, but not clearly needed yet.
+4. Reword/trim the README's "Beyond logins: paths and bodies" workaround
+   note now that the `Content-Length` bug it described is fixed (see
+   "Fixed bugs" above).
 
 ## How to resume this project (e.g. if a session runs out of budget)
 

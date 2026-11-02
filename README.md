@@ -173,20 +173,11 @@ covers two other common uses just by moving where the marker sits:
 
   {"token":"§t§"}
   ```
-  **Caveat, confirmed by testing against the live code, not just reading
-  it:** `Content-Length` is read once, as written in the template, and
-  never recalculated after a payload is injected. This isn't just "wrong
-  header, server complains" — `http.Request.Body` is wrapped to the
-  *original* declared length, so a longer payload is **silently truncated
-  client-side before the request is even sent** (verified: a 17-byte
-  `Content-Length` with a 30-character payload injected sends exactly 17
-  bytes of body, cutting the payload off mid-string, no error raised
-  anywhere). A shorter payload instead leaves the connection waiting to
-  write bytes that never come. Until `internal/template.Build`
-  recalculates `Content-Length` after injection (not yet done — tracked in
-  `STATUS.md`), keep every payload the same byte length for a body marker,
-  or use a target that accepts `Transfer-Encoding: chunked` instead of a
-  fixed `Content-Length`.
+  `Content-Length` doesn't need to match the template's placeholder
+  length — `internal/template.Build` recalculates both `req.ContentLength`
+  and the `Content-Length` header text from the actual resolved body after
+  injection, so a payload longer or shorter than `§t§` sends correctly
+  either way.
 
 There isn't a wordlist-free / recursive / auto-calibrating directory-brute
 mode built in (unlike a dedicated tool such as `ffuf`) — you supply the

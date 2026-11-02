@@ -5,8 +5,11 @@ package template
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -85,6 +88,35 @@ func (t *Template) Build(values []string, target TargetConfig) (*http.Request, e
 	if req.Host == "" {
 		req.Host = host
 	}
+
+	// http.ReadRequest trusts whatever Content-Length the template text
+	// happened to carry and uses it to bound how much of req.Body it will
+	// ever let a caller read — it never re-measures. Injecting a payload
+	// into the body (as opposed to the URL/query/headers, where this has
+	// no effect) commonly changes the body's byte length without the
+	// template's hardcoded Content-Length changing to match, which
+	// silently truncates (or, for a shorter payload, leaves a body the
+	// declared length overshoots) the outgoing request. Re-reading
+	// req.Body here would just hit that same stale limit, so instead pull
+	// the real resolved body directly out of the text Inject produced:
+	// whatever follows the header/body CRLF CRLF boundary is the actual
+	// body, regardless of what Content-Length claims. Whenever a
+	// Content-Length header is present at all, re-derive both
+	// req.ContentLength and the header text from that — a no-op when the
+	// body's length didn't change.
+	if req.Header.Get("Content-Length") != "" {
+		bodyBytes := []byte(resolved)
+		if idx := strings.Index(resolved, "\r\n\r\n"); idx != -1 {
+			bodyBytes = []byte(resolved[idx+len("\r\n\r\n"):])
+		}
+		req.ContentLength = int64(len(bodyBytes))
+		req.Header.Set("Content-Length", strconv.Itoa(len(bodyBytes)))
+		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+		}
+	}
+
 	if req.ContentLength == 0 {
 		req.Body = http.NoBody
 	}
