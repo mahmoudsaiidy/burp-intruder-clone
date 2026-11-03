@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"intruder/internal/attack"
-	"intruder/internal/chain"
-	"intruder/internal/engine"
-	"intruder/internal/match"
-	"intruder/internal/template"
+	"intruder/pkg/attack"
+	"intruder/pkg/chain"
+	"intruder/pkg/engine"
+	"intruder/pkg/match"
+	"intruder/pkg/template"
 )
 
 // jobBuffer is how many job-channel slots Run gives each attack mode ahead

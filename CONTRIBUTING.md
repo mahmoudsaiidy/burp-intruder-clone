@@ -32,18 +32,22 @@ for both).
 ## Making changes
 
 - **Keep `go test -race ./...` passing.** The project has no CI-exempt
-  packages — every `internal/` package has tests, and PRs are expected to
-  keep that true, including for new code.
+  packages — every package under `pkg/` and `internal/` has tests, and PRs
+  are expected to keep that true, including for new code.
 - **Format with `gofmt`** (`gofmt -l .` should print nothing) and run
   `go vet ./...` before opening a PR. CI checks both.
 - **Match the existing style.** Doc comments here tend to explain *why* a
   design choice was made, not just *what* the code does — skim a file or
-  two in `internal/` (e.g. `internal/chain/chain.go`) to get a feel for it
-  before adding a new package.
+  two (e.g. `pkg/chain/chain.go`) to get a feel for it before adding a new
+  package.
 - **New packages should have tests that exercise real behavior**, not just
   mocks — several packages use `httptest` to verify behavior against a
-  live local server (e.g. `internal/attack`'s query-combination tests,
+  live local server (e.g. `pkg/attack`'s query-combination tests,
   `internal/server`'s WebSocket tests). Prefer that style where it fits.
+- **`pkg/` is a public API** — anything added there is importable outside
+  this module, so changes to its exported types/functions are a compat
+  concern, not just an internal refactor. `internal/` (the web UI backend,
+  dev/test targets) has no such constraint.
 - **No new dependencies without discussion.** `go.mod` has stayed
   dependency-free through every package so far (including a hand-rolled
   WebSocket layer in `internal/server` for exactly this reason) — that's a

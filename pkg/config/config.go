@@ -1,8 +1,8 @@
 // Package config is the JSON-serializable description of one attack run —
 // template, target, attack mode, payload generator(s), match rule, and an
 // optional chain of setup stages — plus the code that turns it into the
-// live objects internal/attack, internal/payload, internal/match and
-// internal/chain already define, and runs them end to end.
+// live objects pkg/attack, pkg/payload, pkg/match and
+// pkg/chain already define, and runs them end to end.
 //
 // This is the "real attack configuration" step STATUS.md has been
 // deferring since the web UI and CLI first ran a hardcoded Sniper demo:
@@ -27,11 +27,11 @@ import (
 	"io"
 	"os"
 
-	"intruder/internal/template"
+	"intruder/pkg/template"
 )
 
 // Attack mode names, as they appear in AttackConfig.Mode. These match
-// internal/attack's own four modes one-to-one.
+// pkg/attack's own four modes one-to-one.
 const (
 	ModeSniper       = "sniper"
 	ModeBatteringRam = "battering_ram"
@@ -65,7 +65,7 @@ type AttackConfig struct {
 	// Target is the connection info for the attack's own requests (not any
 	// chain stage's — each Stage carries its own Target, which may differ).
 	Target TargetSpec `json:"target"`
-	// Mode selects which of internal/attack's four job orderings runs the
+	// Mode selects which of pkg/attack's four job orderings runs the
 	// generators against the template's markers. One of the Mode constants
 	// above.
 	Mode string `json:"mode"`

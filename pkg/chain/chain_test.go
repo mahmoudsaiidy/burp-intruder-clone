@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"intruder/internal/engine"
-	"intruder/internal/match"
-	"intruder/internal/template"
+	"intruder/pkg/engine"
+	"intruder/pkg/match"
+	"intruder/pkg/template"
 )
 
 // testTarget turns an httptest.Server's URL into a template.TargetConfig,

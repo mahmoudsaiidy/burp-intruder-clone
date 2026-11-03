@@ -3,9 +3,9 @@ package attack
 import (
 	"context"
 
-	"intruder/internal/engine"
-	"intruder/internal/payload"
-	"intruder/internal/template"
+	"intruder/pkg/engine"
+	"intruder/pkg/payload"
+	"intruder/pkg/template"
 )
 
 // BatteringRamConfig configures a Battering ram run: a single payload

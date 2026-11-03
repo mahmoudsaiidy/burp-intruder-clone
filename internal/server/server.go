@@ -3,9 +3,9 @@
 //
 // "/ws" still runs the original hardcoded demo attack (demo.go). "/ws/config"
 // is the real "submit your own request template and payload list" flow:
-// the client sends one JSON internal/config.AttackConfig as its first text
+// the client sends one JSON pkg/config.AttackConfig as its first text
 // frame, and the server builds and runs it the same way cmd/cli's
-// config-file mode does — both share internal/config.Run rather than each
+// config-file mode does — both share pkg/config.Run rather than each
 // hand-wiring the engine. A request-builder page in web/ that composes
 // that JSON from form inputs is still future work (see STATUS.md); today a
 // client has to send the JSON itself.

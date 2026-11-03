@@ -5,12 +5,12 @@ import (
 	"context"
 	"fmt"
 
-	"intruder/internal/config"
+	"intruder/pkg/config"
 )
 
 // runConfiguredAttack is /ws/config's handler body: read one JSON
 // AttackConfig as the client's first text frame, build and run it via
-// internal/config.Run (the same entry point cmd/cli's config-file mode
+// pkg/config.Run (the same entry point cmd/cli's config-file mode
 // uses), and stream results the same way runDemoAttack does — reusing its
 // wsMessage shape and writeJSON/sendError helpers so a client doesn't need
 // to know which endpoint it talked to in order to render the results.

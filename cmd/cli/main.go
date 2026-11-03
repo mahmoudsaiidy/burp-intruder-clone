@@ -1,9 +1,9 @@
 // Command cli is the headless entry point for the attack engine. With no
 // arguments it runs the original hardcoded Sniper demo against
 // cmd/testserver, same as always. Given a path to a JSON attack config
-// (see internal/config), it loads and runs that instead — the CLI side of
+// (see pkg/config), it loads and runs that instead — the CLI side of
 // "real attack configuration" from STATUS.md's next step, sharing
-// internal/config.Run with the web UI's /ws/config endpoint rather than
+// pkg/config.Run with the web UI's /ws/config endpoint rather than
 // each hand-wiring the engine separately.
 package main
 
@@ -14,12 +14,12 @@ import (
 	"os"
 	"time"
 
-	"intruder/internal/attack"
-	"intruder/internal/config"
-	"intruder/internal/engine"
-	"intruder/internal/match"
-	"intruder/internal/payload"
-	"intruder/internal/template"
+	"intruder/pkg/attack"
+	"intruder/pkg/config"
+	"intruder/pkg/engine"
+	"intruder/pkg/match"
+	"intruder/pkg/payload"
+	"intruder/pkg/template"
 )
 
 func main() {
@@ -31,7 +31,7 @@ func main() {
 }
 
 // runFromConfigFile loads an AttackConfig from path and runs it via
-// internal/config.Run — the same code path the web UI's /ws/config
+// pkg/config.Run — the same code path the web UI's /ws/config
 // endpoint uses, so a config that works from one works from the other.
 func runFromConfigFile(path string) {
 	cfg, err := config.LoadFile(path)

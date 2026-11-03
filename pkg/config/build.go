@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"time"
 
-	"intruder/internal/chain"
-	"intruder/internal/match"
-	"intruder/internal/payload"
-	"intruder/internal/template"
+	"intruder/pkg/chain"
+	"intruder/pkg/match"
+	"intruder/pkg/payload"
+	"intruder/pkg/template"
 )
 
 // Built is an AttackConfig after Build has parsed, constructed and
