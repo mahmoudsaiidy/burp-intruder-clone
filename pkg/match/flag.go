@@ -3,7 +3,7 @@ package match
 import (
 	"context"
 
-	"intruder/internal/engine"
+	"intruder/pkg/engine"
 )
 
 // Flagged pairs one Result with whether it matched the Matcher a Flag call

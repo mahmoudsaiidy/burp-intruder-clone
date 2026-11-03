@@ -5,8 +5,8 @@
 // main attack's raw template — before that text is handed to
 // template.Parse.
 //
-// This is deliberately orchestrated one level above both internal/template
-// and internal/attack rather than being a feature of either: a chain Stage
+// This is deliberately orchestrated one level above both pkg/template
+// and pkg/attack rather than being a feature of either: a chain Stage
 // is just another request+extract step (template.Template to build it,
 // match.Extractor to read it, exactly the primitives those packages already
 // expose), and what it produces is plain text that the attack's own
@@ -26,9 +26,9 @@ import (
 	"strings"
 	"time"
 
-	"intruder/internal/engine"
-	"intruder/internal/match"
-	"intruder/internal/template"
+	"intruder/pkg/engine"
+	"intruder/pkg/match"
+	"intruder/pkg/template"
 )
 
 // maxBodyBytes caps how much of a stage response body Resolve reads, same

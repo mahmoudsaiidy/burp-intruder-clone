@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"intruder/internal/engine"
-	"intruder/internal/payload"
-	"intruder/internal/template"
+	"intruder/pkg/engine"
+	"intruder/pkg/payload"
+	"intruder/pkg/template"
 )
 
 // ClusterBombConfig configures a Cluster bomb run: one payload generator

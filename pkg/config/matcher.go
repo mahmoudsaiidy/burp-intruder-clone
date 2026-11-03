@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"intruder/internal/match"
+	"intruder/pkg/match"
 )
 
 // MatcherSpec is the JSON form of one match.Matcher, including the three

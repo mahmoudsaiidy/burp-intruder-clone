@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 
-	"intruder/internal/payload"
+	"intruder/pkg/payload"
 )
 
 // GeneratorSpec is the JSON form of one payload.Generator: a base

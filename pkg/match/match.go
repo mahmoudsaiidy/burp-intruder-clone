@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"regexp"
 
-	"intruder/internal/engine"
+	"intruder/pkg/engine"
 )
 
 // Matcher decides whether one Result is "interesting" by whatever

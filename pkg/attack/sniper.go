@@ -8,9 +8,9 @@ import (
 	"context"
 	"strconv"
 
-	"intruder/internal/engine"
-	"intruder/internal/payload"
-	"intruder/internal/template"
+	"intruder/pkg/engine"
+	"intruder/pkg/payload"
+	"intruder/pkg/template"
 )
 
 // SniperConfig configures a Sniper-mode run: one payload generator cycled

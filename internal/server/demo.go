@@ -8,18 +8,18 @@ import (
 	"net/http"
 	"time"
 
-	"intruder/internal/attack"
-	"intruder/internal/engine"
-	"intruder/internal/match"
-	"intruder/internal/payload"
-	"intruder/internal/template"
 	"intruder/internal/testtarget"
+	"intruder/pkg/attack"
+	"intruder/pkg/engine"
+	"intruder/pkg/match"
+	"intruder/pkg/payload"
+	"intruder/pkg/template"
 )
 
 // demoWordlist mirrors cmd/cli's hardcoded Sniper demo — same wordlist,
 // same single-marker request shape — now streamed over a WebSocket instead
 // of printed to a console. This is the first wiring of the engine into the
-// web UI; a real "configure your own attack" flow needs internal/config
+// web UI; a real "configure your own attack" flow needs pkg/config
 // (save/load attack configs) and a request-builder UI, neither built yet —
 // see STATUS.md.
 var demoWordlist = []string{"123456", "password", "admin", "hunter2", "letmein", "qwerty"}

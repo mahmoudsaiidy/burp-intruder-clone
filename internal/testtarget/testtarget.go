@@ -83,7 +83,7 @@ func MultiFieldLoginFunc(w http.ResponseWriter, r *http.Request) {
 }
 
 // CSRFFunc simulates a CSRF-token-issuing endpoint, returning "token=<CSRFToken>"
-// in the body — the exact shape internal/chain's and internal/config's own
+// in the body — the exact shape pkg/chain's and pkg/config's own
 // tests already pull out with a `token=(\w+)` body-regex extractor, so an
 // example chain config can extract it the same way.
 func CSRFFunc(w http.ResponseWriter, r *http.Request) {
@@ -92,8 +92,8 @@ func CSRFFunc(w http.ResponseWriter, r *http.Request) {
 
 // SecureLoginFunc is like MultiFieldLoginFunc but additionally requires a
 // valid CSRF token (from CSRFFunc) — a login endpoint that genuinely can't
-// be attacked in one request, for exercising internal/chain +
-// internal/config's chain support (fetch the token first, then feed it
+// be attacked in one request, for exercising pkg/chain +
+// pkg/config's chain support (fetch the token first, then feed it
 // into the attack) against a real, standalone target rather than only
 // httptest-backed unit tests.
 func SecureLoginFunc(w http.ResponseWriter, r *http.Request) {

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"intruder/internal/engine"
-	"intruder/internal/payload"
-	"intruder/internal/template"
+	"intruder/pkg/engine"
+	"intruder/pkg/payload"
+	"intruder/pkg/template"
 )
 
 func TestClusterBomb_FullCombinatorialProduct(t *testing.T) {

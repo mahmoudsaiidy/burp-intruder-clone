@@ -3,7 +3,7 @@ package match
 import (
 	"regexp"
 
-	"intruder/internal/engine"
+	"intruder/pkg/engine"
 )
 
 // Extractor pulls one string value out of a Result — a session token, a

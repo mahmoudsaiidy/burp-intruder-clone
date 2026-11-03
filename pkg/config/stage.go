@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"regexp"
 
-	"intruder/internal/chain"
-	"intruder/internal/match"
+	"intruder/pkg/chain"
+	"intruder/pkg/match"
 )
 
 // StageSpec is the JSON form of one chain.Stage — a setup request run

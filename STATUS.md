@@ -26,15 +26,16 @@ modes, payload handling, concurrency model, and results workflow.
 cmd/server/     entry point: HTTP+WS server, serves web/ and the /ws demo attack — DONE (first slice)
 cmd/cli/        headless entry point — runs one hardcoded Sniper attack
 cmd/testserver/ standalone process wrapping internal/testtarget, for manual dev use
-internal/
+pkg/            public library API (importable outside this module)
   template/     raw HTTP request parsing, §marker§ detection/injection, Build() -> *http.Request
   payload/      Generator interface; Wordlist, NumericRange, BruteForce, processing-rule Chain — all DONE
   attack/       attack-mode orchestration; Sniper, Battering ram, Pitchfork, Cluster bomb all DONE
   engine/       worker pool, shared http.Client, rate limiter+jitter, Result streaming — DONE
   match/        match/filter rules on engine.Result + value extraction — DONE
   chain/        multi-stage request chaining (extract a value, feed it into a later request) — DONE
-  testtarget/   the mock login handler cmd/testserver and the web demo both attack — DONE
   config/       JSON attack-config spec + Build/Run orchestrator — DONE
+internal/       application code, not meant for reuse outside this module
+  testtarget/   the mock login handler cmd/testserver and the web demo both attack — DONE
   server/       web UI backend (HTTP+WS + hand-rolled WebSocket layer) — DONE (first slice: demo attack only)
 web/            static frontend (index.html, no build step) — DONE (first slice)
 ```
@@ -522,21 +523,42 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       trimmed or reworded next time that section is touched, since the
       underlying bug it was working around is fixed.
 
+- [x] **Promote the core engine packages to a public `pkg/` API** —
+      `internal/template`, `internal/payload`, `internal/attack`,
+      `internal/engine`, `internal/match`, `internal/chain`, and
+      `internal/config` moved to `pkg/template`, `pkg/payload`,
+      `pkg/attack`, `pkg/engine`, `pkg/match`, `pkg/chain`, and
+      `pkg/config` respectively (`git mv`, so history follows each file).
+      Pure move: no package contents changed, just the import path (every
+      `intruder/internal/X` import and doc-comment reference across the
+      module rewritten to `intruder/pkg/X`). `internal/server` (web UI
+      backend) and `internal/testtarget` (mock login targets for local
+      dev/testing) deliberately stay under `internal/` — they're
+      application code built on top of the engine, not engine primitives
+      meant for external reuse, so there's no library-API reason to make
+      them importable.
+      - README's "As a library" section rewritten (the packages are now
+        actually importable, not just an open invitation) and its
+        "Project layout" diagram updated to show the `pkg/`/`internal/`
+        split; `CONTRIBUTING.md` updated to reference `pkg/` in its style
+        examples and gained a note that `pkg/` is a public API (exported
+        changes there are a compat concern) while `internal/` isn't.
+      - `go build ./...`, `go vet ./...`, `gofmt -l .` (clean), and
+        `go test -race ./...` all pass post-move, every package included
+        — confirms the move didn't change behavior, just import paths.
+
 ## Next step
 
-1. Promote the core engine packages out of `internal/` to a public `pkg/`
-   API, per the README's "As a library" section — the README already
-   invites this on request but nothing's moved yet.
-2. A saved-config library/gallery in the web UI (list, re-load, re-run a
+1. A saved-config library/gallery in the web UI (list, re-load, re-run a
    previously saved `AttackConfig` from `builder.html`, rather than only
-   "Preview JSON" + "Load testserver example") — `internal/config`'s
+   "Preview JSON" + "Load testserver example") — `pkg/config`'s
    `LoadFile` already does the hard part for the CLI side; this would be
    the web equivalent.
-3. `internal/payload` has four generator types; Burp Intruder also has a
+2. `pkg/payload` has four generator types; Burp Intruder also has a
    "Character substitution" / "Illegal Unicode" / date-range payload type
    historically — worth a look if API-compat with Burp's own payload list
    becomes a goal, but not clearly needed yet.
-4. Reword/trim the README's "Beyond logins: paths and bodies" workaround
+3. Reword/trim the README's "Beyond logins: paths and bodies" workaround
    note now that the `Content-Length` bug it described is fixed (see
    "Fixed bugs" above).
 

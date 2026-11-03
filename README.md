@@ -117,7 +117,7 @@ done: 6 requests (1 flagged) in ...
 ```
 
 Given a path to a JSON `AttackConfig` instead, it runs that — same
-`internal/config.Run` wiring the web UI's `/ws/config` uses, so a config
+`pkg/config.Run` wiring the web UI's `/ws/config` uses, so a config
 that works from one works from the other:
 
 ```sh
@@ -149,7 +149,7 @@ and optionally add chain stages — then run it, streamed the same way over
 
 ### Beyond logins: paths and bodies
 
-A `§marker§` is just a span of the raw request text — `internal/template`
+A `§marker§` is just a span of the raw request text — `pkg/template`
 scans for it the same way wherever it appears, so there's no special mode
 for "attack the URL" vs. "attack a form field." The CLI/web UI demos and
 `examples/` all happen to attack login query params, but the same engine
@@ -174,7 +174,7 @@ covers two other common uses just by moving where the marker sits:
   {"token":"§t§"}
   ```
   `Content-Length` doesn't need to match the template's placeholder
-  length — `internal/template.Build` recalculates both `req.ContentLength`
+  length — `pkg/template.Build` recalculates both `req.ContentLength`
   and the `Content-Length` header text from the actual resolved body after
   injection, so a payload longer or shorter than `§t§` sends correctly
   either way.
@@ -206,11 +206,20 @@ outside of `go test`, not just the single-field Sniper demo.
 
 ### As a library
 
-Every attack-engine package lives under `internal/` for now (see
-[Project layout](#project-layout)), so it isn't importable from outside
-this module yet. If you want to build on the engine directly rather than
-through the CLI/web UI, open an issue — promoting a package to a public
-`pkg/` API is a reasonable ask and easy to prioritize if there's demand.
+The core attack-engine packages live under `pkg/` (see
+[Project layout](#project-layout)) and are importable from outside this
+module — `pkg/template`, `pkg/payload`, `pkg/attack`, `pkg/engine`,
+`pkg/match`, `pkg/chain`, and `pkg/config` are the same packages the CLI
+and web UI themselves use, with no separate "library mode." `pkg/config`
+is the highest-level entry point (build an `AttackConfig`, call `Build()`
+then `Run(ctx)`) if you just want to drive an attack from your own Go code
+without wiring the lower-level packages together by hand; reach for the
+individual packages directly if you need finer control over any one stage
+(custom payload generators, a different HTTP client, etc.).
+
+The web UI backend (`internal/server`) and the mock login targets used for
+local dev/testing (`internal/testtarget`) stay under `internal/` — they're
+application code, not engine primitives meant for reuse.
 
 ## Architecture
 
@@ -249,18 +258,19 @@ first; see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 cmd/server/     entry point: HTTP+WS server, serves web/, the /ws demo attack, and /ws/config
 cmd/cli/        headless entry point — runs the hardcoded Sniper demo, or a JSON config file if given one
 cmd/testserver/ standalone process wrapping internal/testtarget, for manual dev use
-internal/
+pkg/            public library API — importable from outside this module (see "As a library" above)
   template/     raw HTTP request parsing, §marker§ detection/injection
   payload/      payload generators + processing-rule chains
   attack/       attack-mode orchestration (sniper, battering ram, pitchfork, cluster bomb)
   engine/       worker pool, shared http.Client, rate limiter, result streaming
   match/        match/filter rules + value extraction
   chain/        multi-stage request chaining (extract a value, feed it into a later request)
+  config/       JSON attack-config spec (template/target/mode/generators/matcher/chain) + build/run orchestrator
+internal/       application code, not meant for reuse outside this module
   testtarget/   mock login endpoints cmd/testserver and the web demo attack: a
                 single-field /login (the original demo target), a two-field
                 /login/multi (Pitchfork/Cluster bomb), and a /csrf + gated
                 /login/secure pair (chain support)
-  config/       JSON attack-config spec (template/target/mode/generators/matcher/chain) + build/run orchestrator
   server/       web UI backend: HTTP+WS, hand-rolled stdlib WebSocket layer
 web/            static frontend — index.html (demo attack) + builder.html (configure & run your own), no build step
 ```
@@ -268,7 +278,7 @@ web/            static frontend — index.html (demo attack) + builder.html (con
 ## Project status
 
 Core engine, all four attack modes, payload/match tooling, multi-stage
-chaining, the JSON `internal/config` layer, and the web UI — including
+chaining, the JSON `pkg/config` layer, and the web UI — including
 `builder.html`, a page to compose and run your own request template,
 payloads, and match rule entirely in the browser — are built and tested
 (`go test -race ./...` is green). See `STATUS.md` for what's still open.

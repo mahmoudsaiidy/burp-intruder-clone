@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"testing"
 
-	"intruder/internal/engine"
+	"intruder/pkg/engine"
 )
 
 func TestBodyRegexExtractor_CapturesFirstGroup(t *testing.T) {

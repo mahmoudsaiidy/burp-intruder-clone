@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"intruder/internal/engine"
+	"intruder/pkg/engine"
 )
 
 func TestFlag_TagsEveryResultWithoutDroppingOrReordering(t *testing.T) {
