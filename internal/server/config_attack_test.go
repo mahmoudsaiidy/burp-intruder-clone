@@ -61,7 +61,7 @@ func TestConfigAttack_EndToEnd(t *testing.T) {
 	defer loginSrv.Close()
 	host, port := splitTestServerURL(t, loginSrv.URL)
 
-	srv := httptest.NewServer(NewHandler(""))
+	srv := httptest.NewServer(NewHandler("", nil))
 	defer srv.Close()
 
 	rawConn, br := dialWebSocket(t, srv.URL+"/ws/config")
@@ -154,7 +154,7 @@ func TestConfigAttack_EndToEnd(t *testing.T) {
 // build (here: a mode/generator-count mismatch) comes back as a single
 // "error" message rather than a panic or a silently empty stream.
 func TestConfigAttack_InvalidConfig(t *testing.T) {
-	srv := httptest.NewServer(NewHandler(""))
+	srv := httptest.NewServer(NewHandler("", nil))
 	defer srv.Close()
 
 	rawConn, br := dialWebSocket(t, srv.URL+"/ws/config")

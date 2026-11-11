@@ -547,20 +547,81 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
         `go test -race ./...` all pass post-move, every package included
         — confirms the move didn't change behavior, just import paths.
 
+- [x] **Saved-config gallery, web UI** — `internal/configstore` (new
+      package) + a small REST API on `internal/server` + a new section in
+      `web/builder.html`, the "Next step" #1 from the previous version of
+      this file: list, save (create or overwrite), load, and delete a named
+      `AttackConfig` from the builder page itself, not just "Preview JSON"
+      + "Load testserver example".
+      - `internal/configstore` — a `Store` is a directory of
+        `"<name>.json"` files. `ValidateName` restricts names to
+        `[A-Za-z0-9 _.-]{1,100}` with no leading/trailing space — a charset
+        that excludes every path separator, so a valid name can never
+        escape the store's directory (no separate ".." check needed).
+        `Save` parses `data` with `pkg/config.Load` (the same parser
+        `cmd/cli`'s config-file mode and `/ws/config` both run on
+        load/run) before writing anything, so a malformed document is
+        rejected at save time rather than silently corrupting the gallery
+        or only failing later on load+run; a bad document (`ErrInvalidConfig`)
+        and a bad name (`ErrInvalidName`) are distinct sentinels from a
+        missing one (`ErrNotFound`), so a caller can map each to the right
+        HTTP status without re-deriving the distinction. Writes are
+        atomic (temp file in the same directory, then renamed into place).
+        `List` returns names sorted, ignoring any non-`.json` entry so a
+        stray file in the directory can't corrupt the listing.
+      - `internal/server/config_store.go` — `registerConfigStoreRoutes`
+        wires plain JSON REST (not WebSocket-framed, since this is simple
+        CRUD rather than a streamed result feed) onto four routes:
+        `GET /api/configs` (list), `GET /api/configs/{name}` (fetch, raw
+        JSON passthrough), `PUT /api/configs/{name}` (save, body-size
+        capped at 1 MiB), `DELETE /api/configs/{name}`. `storeError` maps
+        `configstore`'s sentinels to 404/400, anything else to a logged
+        500. `NewHandler` gained a `*configstore.Store` parameter —
+        `nil` skips registering these routes entirely (existing tests,
+        and any future caller that wants the gallery off, pass `nil`).
+      - `cmd/server/main.go` gained a `-configs` flag (default `./configs`,
+        created if missing; pass `-configs=""` to disable the gallery)
+        wiring a `configstore.Store` into `NewHandler`.
+      - `web/builder.html` — a new "Saved configs" section: a name field +
+        Save button, and a list of saved names each with Load/Delete,
+        fetched from `/api/configs` on page load and refreshed after every
+        save/delete. `loadConfigIntoState` is the inverse of the existing
+        `buildConfig`/`buildGeneratorSpec`/`buildConditionSpec`/
+        `buildStageSpec` functions, so Load round-trips through the exact
+        JSON shape Save (and "Preview JSON") produce — including
+        generators, the match-rule conditions (best-effort for a matcher
+        tree deeper than the builder itself can produce, which is the only
+        kind Save can ever actually write), and chain stages.
+      Tests: `internal/configstore/configstore_test.go` — save/load
+      round-trip, overwrite, invalid name/invalid JSON rejected (and
+      confirmed nothing was written), not-found on load/delete, list
+      sorted and ignoring non-`.json`/directory entries, `New` creating a
+      missing directory. `internal/server/config_store_test.go` — every
+      route live over real HTTP via `httptest.NewServer`, including the
+      404/400 status mapping and that the routes simply aren't registered
+      when `NewHandler` is given a `nil` store. `go test -race ./...`
+      passes, both new test files included; `gofmt -l .` and
+      `go vet ./...` clean. Also verified live, headless-browser-driven
+      against a real `cmd/server` (`-configs` pointed at a scratch
+      directory) + `cmd/testserver`: loaded the testserver example, saved
+      it, overwrote the template field in the form, clicked Load and
+      confirmed the original template came back, ran it and got the same
+      known-good `hunter2` → flagged result the hardcoded demo always
+      gets, then deleted it and confirmed the gallery list went back to
+      empty.
+
 ## Next step
 
-1. A saved-config library/gallery in the web UI (list, re-load, re-run a
-   previously saved `AttackConfig` from `builder.html`, rather than only
-   "Preview JSON" + "Load testserver example") — `pkg/config`'s
-   `LoadFile` already does the hard part for the CLI side; this would be
-   the web equivalent.
-2. `pkg/payload` has four generator types; Burp Intruder also has a
+1. `pkg/payload` has four generator types; Burp Intruder also has a
    "Character substitution" / "Illegal Unicode" / date-range payload type
    historically — worth a look if API-compat with Burp's own payload list
    becomes a goal, but not clearly needed yet.
-3. Reword/trim the README's "Beyond logins: paths and bodies" workaround
+2. Reword/trim the README's "Beyond logins: paths and bodies" workaround
    note now that the `Content-Length` bug it described is fixed (see
    "Fixed bugs" above).
+3. The saved-config gallery has no rename — deleting and re-saving under a
+   new name is the current workaround. Not clearly needed yet; worth
+   adding if it comes up in practice.
 
 ## How to resume this project (e.g. if a session runs out of budget)
 

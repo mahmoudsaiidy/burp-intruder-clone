@@ -145,7 +145,14 @@ To run your *own* request template instead of the demo, open
 generator per marker (with optional processing rules), build a match rule,
 and optionally add chain stages — then run it, streamed the same way over
 `/ws/config`. "Load testserver example" fills in a working config against
-`go run ./cmd/testserver` to try it with nothing else to set up first.
+`go run ./cmd/testserver` to try it with nothing else to set up first. A
+"Saved configs" section lets you save the current form under a name, then
+list, reload, or delete it later — backed by a small `/api/configs` REST
+API (`internal/configstore`) that persists each one as JSON in a directory
+on disk (`-configs`, default `./configs`; pass `-configs=""` to disable the
+gallery). "Preview JSON" always shows the exact document that Save/Run
+will send, so a saved config can also be copied out and used as a
+`cmd/cli path/to/config.json` file.
 
 ### Beyond logins: paths and bodies
 
@@ -271,8 +278,11 @@ internal/       application code, not meant for reuse outside this module
                 single-field /login (the original demo target), a two-field
                 /login/multi (Pitchfork/Cluster bomb), and a /csrf + gated
                 /login/secure pair (chain support)
-  server/       web UI backend: HTTP+WS, hand-rolled stdlib WebSocket layer
-web/            static frontend — index.html (demo attack) + builder.html (configure & run your own), no build step
+  server/       web UI backend: HTTP+WS, hand-rolled stdlib WebSocket layer,
+                plus the saved-config gallery's /api/configs REST routes
+  configstore/  saved-config gallery's storage: a directory of named
+                AttackConfig JSON files, validated on save
+web/            static frontend — index.html (demo attack) + builder.html (configure & run your own, plus the saved-config gallery), no build step
 ```
 
 ## Project status
