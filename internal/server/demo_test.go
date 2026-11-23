@@ -14,7 +14,7 @@ import (
 // demoWordlist entry, exactly one of them flagged (the "hunter2" hit), and
 // a final "done" summary matching those counts.
 func TestDemoAttack_EndToEnd(t *testing.T) {
-	srv := httptest.NewServer(NewHandler(""))
+	srv := httptest.NewServer(NewHandler("", nil))
 	defer srv.Close()
 
 	rawConn, br := dialWebSocket(t, srv.URL+"/ws")
@@ -93,7 +93,7 @@ func TestDemoAttack_EndToEnd(t *testing.T) {
 // TestNewHandler_ServesStaticFiles checks the webDir branch separately from
 // the WebSocket demo above, since most tests pass "" to skip it.
 func TestNewHandler_ServesStaticFiles(t *testing.T) {
-	srv := httptest.NewServer(NewHandler("testdata"))
+	srv := httptest.NewServer(NewHandler("testdata", nil))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/hello.txt")

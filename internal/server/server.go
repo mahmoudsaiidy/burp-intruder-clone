@@ -14,6 +14,8 @@ package server
 import (
 	"context"
 	"net/http"
+
+	"intruder/internal/configstore"
 )
 
 // NewHandler returns the web UI's top-level http.Handler:
@@ -21,13 +23,18 @@ import (
 //     (demo.go), streaming results as they arrive.
 //   - "/ws/config" upgrades to a WebSocket, reads one JSON AttackConfig as
 //     the client's first message, and runs that attack (config_attack.go).
+//   - "/api/configs" (plain JSON, not WebSocket) lists, fetches, saves, and
+//     deletes named AttackConfig documents in store — builder.html's saved-
+//     config gallery (config_store.go). Registered only when store is
+//     non-nil; tests and callers that don't need the gallery pass nil.
 //   - "/" (and everything else) serves static files from webDir, when
 //     webDir is non-empty. Tests that only exercise "/ws"/"/ws/config" pass
 //     "".
-func NewHandler(webDir string) http.Handler {
+func NewHandler(webDir string, store *configstore.Store) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", handleWS)
 	mux.HandleFunc("/ws/config", handleWSConfig)
+	registerConfigStoreRoutes(mux, store)
 	if webDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(webDir)))
 	}

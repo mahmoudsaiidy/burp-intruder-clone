@@ -3,3 +3,7 @@
 *.test
 *.out
 .DS_Store
+
+# cmd/server's default saved-config gallery directory (-configs), created
+# on demand — the configs it holds are local run data, not source.
+/configs

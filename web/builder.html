@@ -273,6 +273,26 @@ Connection: close
     </div>
   </section>
 
+  <section>
+    <h2>Saved configs</h2>
+    <p class="hint" style="margin: 0 0 0.75rem;">
+      Save everything above under a name, then Load or Delete it later —
+      backed by <code>/api/configs</code> on the server, the same
+      <code>AttackConfig</code> JSON <code>cmd/cli path/to/config.json</code>
+      and "Preview JSON" use.
+    </p>
+    <div class="row">
+      <div class="field" style="flex: 2;">
+        <label for="savedConfigName">Name</label>
+        <input type="text" id="savedConfigName" placeholder="e.g. login-sniper">
+      </div>
+      <div class="field" style="flex: 0 0 auto; align-self: flex-end;">
+        <button type="button" class="secondary" id="saveConfigBtn">Save current config</button>
+      </div>
+    </div>
+    <div id="savedConfigsList" class="hint">loading saved configs...</div>
+  </section>
+
   <div class="actions">
     <button type="button" id="runBtn">Run attack</button>
     <button type="button" class="secondary" id="previewBtn">Preview JSON</button>
@@ -647,6 +667,183 @@ Connection: close
       return cfg;
     }
 
+    // ---------- saved-config gallery ----------
+    // Inverse of buildGeneratorSpec/buildConditionSpec/buildStageSpec/
+    // buildConfig below: turns a loaded AttackConfig JSON document back
+    // into this page's editable state, so "Load" round-trips through the
+    // same shape "Save" (and "Preview JSON") produced.
+    function parseGeneratorSpec(spec) {
+      const g = { type: spec.type || 'wordlist', words: '', from: 0, to: 10, step: 1, minDigits: 0, charset: 'abc', minLen: 1, maxLen: 2, rules: [] };
+      if (spec.type === 'wordlist') {
+        g.words = Array.isArray(spec.words) ? spec.words.join('\n') : '';
+      } else if (spec.type === 'numeric_range') {
+        g.from = spec.from ?? 0;
+        g.to = spec.to ?? 0;
+        g.step = spec.step ?? 1;
+        g.minDigits = spec.min_digits ?? 0;
+      } else if (spec.type === 'brute_force') {
+        g.charset = spec.charset || '';
+        g.minLen = spec.min_len ?? 1;
+        g.maxLen = spec.max_len ?? 1;
+      }
+      if (Array.isArray(spec.rules)) {
+        g.rules = spec.rules.map(r => ({ type: r.type, value: r.value || '' }));
+      }
+      return g;
+    }
+
+    function parseConditionSpec(spec) {
+      let not = false;
+      if (spec.type === 'not' && spec.child) {
+        not = true;
+        spec = spec.child;
+      }
+      return {
+        type: spec.type || 'status',
+        op: spec.op || 'eq',
+        value: spec.value ?? 200,
+        pattern: spec.pattern || '',
+        header: spec.header || '',
+        not,
+      };
+    }
+
+    // The builder can only ever emit a single flat and/or (or one bare
+    // condition) as a matcher — see buildMatcherSpec — so that's the only
+    // shape loaded back in. A hand-written or differently-built config
+    // with deeper nesting still loads (its outer and/or, or its one
+    // top-level condition), just not any nesting inside that; Preview JSON
+    // after loading shows exactly what will actually run.
+    function parseMatcherSpec(matcher) {
+      if (!matcher) return { combinator: 'or', conditions: [] };
+      if ((matcher.type === 'and' || matcher.type === 'or') && Array.isArray(matcher.children)) {
+        return { combinator: matcher.type, conditions: matcher.children.map(parseConditionSpec) };
+      }
+      return { combinator: 'or', conditions: [parseConditionSpec(matcher)] };
+    }
+
+    function parseStageSpec(s) {
+      const target = s.target || {};
+      const extractor = s.extractor || {};
+      return {
+        name: s.name || '',
+        raw: s.raw || '',
+        placeholder: s.placeholder || '',
+        host: target.host || '',
+        port: target.port ?? 0,
+        useTls: !!target.use_tls,
+        extractorType: extractor.type || 'body_regex',
+        extractorPattern: extractor.pattern || '',
+        extractorHeader: extractor.header || '',
+      };
+    }
+
+    function loadConfigIntoState(cfg) {
+      const target = cfg.target || {};
+      document.getElementById('host').value = target.host || '';
+      document.getElementById('port').value = target.port ?? 0;
+      document.getElementById('useTls').checked = !!target.use_tls;
+      templateEl.value = cfg.template || '';
+      modeEl.value = cfg.mode || 'sniper';
+
+      generators = Array.isArray(cfg.generators) && cfg.generators.length > 0
+        ? cfg.generators.map(parseGeneratorSpec)
+        : [{ type: 'wordlist', words: '', from: 0, to: 10, step: 1, minDigits: 0, charset: 'abc', minLen: 1, maxLen: 2, rules: [] }];
+
+      const parsedMatcher = parseMatcherSpec(cfg.matcher);
+      document.getElementById('matchCombinator').value = parsedMatcher.combinator;
+      conditions = parsedMatcher.conditions;
+
+      stages = Array.isArray(cfg.chain) ? cfg.chain.map(parseStageSpec) : [];
+
+      document.getElementById('workers').value = cfg.workers ?? 5;
+      document.getElementById('rate').value = cfg.rate_per_second ?? 0;
+      document.getElementById('jitter').value = cfg.jitter_max_ms ?? 0;
+      document.getElementById('timeout').value = cfg.timeout_seconds ?? 30;
+
+      refreshMarkerHint();
+      syncGeneratorCount();
+      renderGenerators();
+      renderConditions();
+      renderStages();
+    }
+
+    const savedConfigNameEl = document.getElementById('savedConfigName');
+    const savedConfigsListEl = document.getElementById('savedConfigsList');
+
+    async function refreshSavedConfigs() {
+      try {
+        const resp = await fetch('/api/configs');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const names = await resp.json();
+        savedConfigsListEl.innerHTML = '';
+        savedConfigsListEl.style.color = '';
+        if (!names || names.length === 0) {
+          savedConfigsListEl.textContent = 'no saved configs yet';
+          savedConfigsListEl.style.color = 'var(--muted)';
+          return;
+        }
+        names.forEach(name => {
+          savedConfigsListEl.appendChild(el('div', { class: 'inline', style: 'margin-bottom: 0.4rem;' },
+            el('span', { style: 'flex: 1; overflow-wrap: anywhere; color: var(--text);' }, name),
+            el('button', { type: 'button', class: 'secondary small', onclick: () => loadSavedConfig(name) }, 'Load'),
+            el('button', { type: 'button', class: 'secondary small', onclick: () => deleteSavedConfig(name) }, 'Delete')));
+        });
+      } catch (err) {
+        savedConfigsListEl.textContent = `couldn't reach the saved-config gallery (${err.message}) — is the server running with it enabled?`;
+        savedConfigsListEl.style.color = 'var(--err)';
+      }
+    }
+
+    document.getElementById('saveConfigBtn').addEventListener('click', async () => {
+      const name = savedConfigNameEl.value.trim();
+      if (!name) {
+        statusEl.textContent = 'enter a name before saving.';
+        return;
+      }
+      const { unmatched } = countMarkers(templateEl.value);
+      if (unmatched) {
+        statusEl.textContent = 'Fix the unmatched § delimiter in the template before saving.';
+        return;
+      }
+      try {
+        const resp = await fetch(`/api/configs/${encodeURIComponent(name)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildConfig()),
+        });
+        if (!resp.ok) throw new Error((await resp.text()).trim() || `HTTP ${resp.status}`);
+        statusEl.textContent = `saved "${name}".`;
+        refreshSavedConfigs();
+      } catch (err) {
+        statusEl.textContent = `couldn't save "${name}": ${err.message}`;
+      }
+    });
+
+    async function loadSavedConfig(name) {
+      try {
+        const resp = await fetch(`/api/configs/${encodeURIComponent(name)}`);
+        if (!resp.ok) throw new Error((await resp.text()).trim() || `HTTP ${resp.status}`);
+        loadConfigIntoState(await resp.json());
+        savedConfigNameEl.value = name;
+        statusEl.textContent = `loaded "${name}". Review and Run when ready.`;
+      } catch (err) {
+        statusEl.textContent = `couldn't load "${name}": ${err.message}`;
+      }
+    }
+
+    async function deleteSavedConfig(name) {
+      if (!confirm(`Delete saved config "${name}"? This can't be undone.`)) return;
+      try {
+        const resp = await fetch(`/api/configs/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        if (!resp.ok) throw new Error((await resp.text()).trim() || `HTTP ${resp.status}`);
+        statusEl.textContent = `deleted "${name}".`;
+        refreshSavedConfigs();
+      } catch (err) {
+        statusEl.textContent = `couldn't delete "${name}": ${err.message}`;
+      }
+    }
+
     // ---------- run / preview ----------
     const runBtn = document.getElementById('runBtn');
     const statusEl = document.getElementById('status');
@@ -741,6 +938,7 @@ Connection: close
     renderGenerators();
     renderConditions();
     renderStages();
+    refreshSavedConfigs();
   </script>
 </body>
 </html>
