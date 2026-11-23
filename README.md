@@ -41,10 +41,14 @@ core with a CLI and a web UI on top.
   - **Battering ram** — a single payload broadcast into every marker at once.
   - **Pitchfork** — one generator per marker, walked in lockstep.
   - **Cluster bomb** — one generator per marker, full combinatorial product.
-- **Four payload generator types** — wordlist, numeric range (with
-  zero-padding), brute force (charset + length range), and processing-rule
-  chains (URL-encode, Base64, prefix/suffix, case) that wrap *any* other
-  generator.
+- **Seven payload generator types** — wordlist, numeric range (with
+  zero-padding), brute force (charset + length range), character
+  substitution (every leetspeak-style variant of a word list, e.g.
+  `password` → `p4ssw0rd`), illegal Unicode (overlong UTF-8 encodings of a
+  character, for probing decoders/filters — the classic `%c0%ae` IIS
+  Unicode-bug style of path-traversal bypass), date range, and
+  processing-rule chains (URL-encode, Base64, prefix/suffix, case) that
+  wrap *any* other generator.
 - **Multi-stage request chaining** — fire a setup request (a login, a
   token fetch), extract a value from its response, and carry it forward
   into later requests — e.g. a CSRF token or session cookie.
