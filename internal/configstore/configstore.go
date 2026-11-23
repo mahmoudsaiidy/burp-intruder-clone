@@ -44,6 +44,11 @@ var ErrInvalidName = errors.New("configstore: invalid name")
 // itself.
 var ErrInvalidConfig = errors.New("configstore: invalid config document")
 
+// ErrNameTaken is returned by Rename when newName already names a saved
+// config — Rename never silently overwrites one saved config with
+// another; Delete the target first if that's really what's wanted.
+var ErrNameTaken = errors.New("configstore: name already in use")
+
 // validName matches the names Store accepts: 1-100 of letters, digits,
 // spaces, dashes, underscores, or dots. Deliberately excludes every path
 // separator (no "/", no "\"), which also rules out any ".."-style
@@ -142,6 +147,49 @@ func (s *Store) Save(name string, data []byte) error {
 	if err := os.Rename(tmpPath, s.path(name)); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("configstore: %q: %w", name, err)
+	}
+	return nil
+}
+
+// Rename renames the saved config under oldName to newName, without
+// touching its contents. Both names are validated the same way Save/Load
+// validate theirs. oldName must already exist (ErrNotFound if not); unless
+// newName equals oldName (a no-op, returns nil without touching the file),
+// newName must not already be taken (ErrNameTaken if it is) — Rename never
+// silently clobbers another saved config, unlike Save's own
+// create-or-overwrite behavior. The rename itself is a single os.Rename,
+// atomic the same way Save's write is.
+func (s *Store) Rename(oldName, newName string) error {
+	if err := ValidateName(oldName); err != nil {
+		return err
+	}
+	if err := ValidateName(newName); err != nil {
+		return err
+	}
+	if oldName == newName {
+		if _, err := os.Stat(s.path(oldName)); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("configstore: %q: %w", oldName, ErrNotFound)
+			}
+			return fmt.Errorf("configstore: renaming %q: %w", oldName, err)
+		}
+		return nil
+	}
+
+	if _, err := os.Stat(s.path(oldName)); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("configstore: %q: %w", oldName, ErrNotFound)
+		}
+		return fmt.Errorf("configstore: renaming %q: %w", oldName, err)
+	}
+	if _, err := os.Stat(s.path(newName)); err == nil {
+		return fmt.Errorf("configstore: %q: %w", newName, ErrNameTaken)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("configstore: renaming to %q: %w", newName, err)
+	}
+
+	if err := os.Rename(s.path(oldName), s.path(newName)); err != nil {
+		return fmt.Errorf("configstore: renaming %q to %q: %w", oldName, newName, err)
 	}
 	return nil
 }

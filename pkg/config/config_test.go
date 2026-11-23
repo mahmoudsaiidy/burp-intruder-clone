@@ -42,6 +42,14 @@ func TestGeneratorSpec_Build(t *testing.T) {
 		{"wordlist empty", GeneratorSpec{Type: "wordlist"}, 0, true},
 		{"numeric_range", GeneratorSpec{Type: "numeric_range", From: 1, To: 5, Step: 1}, 5, false},
 		{"brute_force", GeneratorSpec{Type: "brute_force", Charset: "ab", MinLen: 1, MaxLen: 1}, 2, false},
+		{"char_substitution", GeneratorSpec{Type: "char_substitution", Words: []string{"ab"}, Substitutions: map[string][]string{"a": {"4"}, "b": {"8"}}}, 4, false},
+		{"char_substitution empty words", GeneratorSpec{Type: "char_substitution"}, 0, true},
+		{"char_substitution multi-char key", GeneratorSpec{Type: "char_substitution", Words: []string{"a"}, Substitutions: map[string][]string{"ab": {"4"}}}, 0, true},
+		{"illegal_unicode", GeneratorSpec{Type: "illegal_unicode", Chars: "./"}, 6, false},
+		{"illegal_unicode empty chars", GeneratorSpec{Type: "illegal_unicode"}, 0, true},
+		{"date_range", GeneratorSpec{Type: "date_range", DateFrom: "2024-01-01T00:00:00Z", DateTo: "2024-01-04T00:00:00Z", Step: 86400, Layout: "2006-01-02"}, 4, false},
+		{"date_range bad date_from", GeneratorSpec{Type: "date_range", DateFrom: "not-a-date", DateTo: "2024-01-04T00:00:00Z", Step: 86400}, 0, true},
+		{"date_range bad date_to", GeneratorSpec{Type: "date_range", DateFrom: "2024-01-01T00:00:00Z", DateTo: "not-a-date", Step: 86400}, 0, true},
 		{"unknown type", GeneratorSpec{Type: "nonsense"}, 0, true},
 		{"missing type", GeneratorSpec{}, 0, true},
 	}
@@ -61,6 +69,30 @@ func TestGeneratorSpec_Build(t *testing.T) {
 				t.Fatalf("Len() = %d, want %d", g.Len(), tt.wantLen)
 			}
 		})
+	}
+}
+
+func TestLoad_NewGeneratorTypesRoundTrip(t *testing.T) {
+	raw := `{
+		"template": "GET /login?password=§pass§ HTTP/1.1\r\nHost: x\r\n\r\n",
+		"target": {"host": "127.0.0.1", "port": 8089},
+		"mode": "sniper",
+		"generators": [{
+			"type": "char_substitution",
+			"words": ["pass"],
+			"substitutions": {"a": ["4", "@"]}
+		}]
+	}`
+	cfg, err := Load(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	g, err := cfg.Generators[0].Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if g.Len() != 3 {
+		t.Fatalf("Len() = %d, want 3", g.Len())
 	}
 }
 

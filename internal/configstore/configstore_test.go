@@ -123,6 +123,103 @@ func TestDelete_NotFound(t *testing.T) {
 	}
 }
 
+func TestRename(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.Save("old", []byte(validConfigJSON)); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if err := s.Rename("old", "new"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	if _, err := s.Load("old"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Load(old) after Rename: got %v, want ErrNotFound", err)
+	}
+	got, err := s.Load("new")
+	if err != nil {
+		t.Fatalf("Load(new): %v", err)
+	}
+	if string(got) != validConfigJSON {
+		t.Errorf("Load(new) = %s, want %s", got, validConfigJSON)
+	}
+}
+
+func TestRename_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.Rename("nope", "new"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Rename: got %v, want ErrNotFound", err)
+	}
+}
+
+func TestRename_NameTaken(t *testing.T) {
+	s := newTestStore(t)
+	const other = `{"template":"y","mode":"sniper","generators":[]}`
+	if err := s.Save("old", []byte(validConfigJSON)); err != nil {
+		t.Fatalf("Save(old): %v", err)
+	}
+	if err := s.Save("new", []byte(other)); err != nil {
+		t.Fatalf("Save(new): %v", err)
+	}
+
+	if err := s.Rename("old", "new"); !errors.Is(err, ErrNameTaken) {
+		t.Fatalf("Rename: got %v, want ErrNameTaken", err)
+	}
+
+	// Neither saved config should have been touched by the rejected rename.
+	got, err := s.Load("old")
+	if err != nil {
+		t.Fatalf("Load(old): %v", err)
+	}
+	if string(got) != validConfigJSON {
+		t.Errorf("Load(old) = %s, want untouched %s", got, validConfigJSON)
+	}
+	got, err = s.Load("new")
+	if err != nil {
+		t.Fatalf("Load(new): %v", err)
+	}
+	if string(got) != other {
+		t.Errorf("Load(new) = %s, want untouched %s", got, other)
+	}
+}
+
+func TestRename_SameNameIsNoOp(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.Save("cfg", []byte(validConfigJSON)); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := s.Rename("cfg", "cfg"); err != nil {
+		t.Fatalf("Rename(same name): %v", err)
+	}
+	got, err := s.Load("cfg")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if string(got) != validConfigJSON {
+		t.Errorf("Load = %s, want unchanged %s", got, validConfigJSON)
+	}
+}
+
+func TestRename_SameNameNotFound(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.Rename("nope", "nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Rename(same name, missing): got %v, want ErrNotFound", err)
+	}
+}
+
+func TestRename_InvalidNames(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.Save("cfg", []byte(validConfigJSON)); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := s.Rename("../escape", "cfg"); !errors.Is(err, ErrInvalidName) {
+		t.Fatalf("Rename(bad old name): got %v, want ErrInvalidName", err)
+	}
+	if err := s.Rename("cfg", "../escape"); !errors.Is(err, ErrInvalidName) {
+		t.Fatalf("Rename(bad new name): got %v, want ErrInvalidName", err)
+	}
+}
+
 func TestList_SortedAndFiltersNonJSON(t *testing.T) {
 	s := newTestStore(t)
 	for _, name := range []string{"zeta", "alpha", "mid"} {

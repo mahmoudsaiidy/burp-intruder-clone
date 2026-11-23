@@ -483,6 +483,123 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       `go build ./...`, `go vet ./...`, `gofmt -l .` (clean), and
       `go test -race ./...` all pass, `internal/testtarget` included.
 
+- [x] **Three more `pkg/payload` generator types**, matching Burp's own
+      historical payload-type list (STATUS.md "Next step" #1) — each a
+      plain `Generator`, so all three compose with every attack mode and
+      with `Chain` exactly like `Wordlist`/`NumericRange`/`BruteForce`
+      already do:
+      - `char_substitution.go` — `CharSubstitution{Words,
+        Substitutions map[rune][]string}` / `NewCharSubstitution(words,
+        substitutions)`. Burp's "Character substitution" payload type: for
+        each word and each character position with one or more configured
+        replacements, produces every combination of the original character
+        or one of its replacements at that position (odometer-style, same
+        last-position-varies-fastest convention `BruteForce.advance`
+        already uses) — e.g. `password` with `a→{4}, o→{0}` produces
+        `password`, `passw0rd`, `p4ssword`, `p4ssw0rd`. The original word
+        (every position at its "use the original character" choice) is
+        always the first variant. A word with no substitutable characters
+        produces itself, once. `Len()` is the sum, over every word, of the
+        product of each position's option count (computed directly, no
+        walking the sequence, same as `NumericRange.Len`/`BruteForce.Len`).
+      - `illegal_unicode.go` — `IllegalUnicode{Chars []rune}` /
+        `NewIllegalUnicode(chars)`. Burp's "Illegal Unicode" payload type:
+        for each ASCII character in `Chars`, produces its 2-byte, 3-byte,
+        and 4-byte *overlong* UTF-8 encodings (non-canonical encodings a
+        conformant decoder must reject, but a surprising number of
+        real-world ones don't) as lower-case `%`-escaped byte sequences —
+        e.g. `.` (0x2E) → `%c0%ae`, `%e0%80%ae`, `%f0%80%80%ae`, the
+        classic IIS Unicode-bug byte pair (`%c0%ae%c0%ae` for `../`) being
+        the first of these. A non-ASCII rune in `Chars` has no overlong
+        form defined and is silently skipped — doesn't count toward `Len`
+        or appear in the output — same "invalid input shrinks the
+        generator, doesn't error or panic" convention the existing
+        generators use.
+      - `date_range.go` — `DateRange{From, To time.Time, Step
+        time.Duration, Layout string}` / `NewDateRange(from, to, step,
+        layout)`. Burp's "Dates" payload type: an inclusive arithmetic
+        sequence of `time.Time` values from `From` to `To` stepping by
+        `Step`, each formatted with `Layout` (a Go reference-time layout;
+        `""` defaults to `time.RFC3339`) — same "arithmetic sequence,
+        `Step <= 0` or an inverted range is an empty generator" shape
+        `NumericRange` already has, just over time instead of integers.
+        `Len()` is computed directly from the bounds, same approach.
+      Tests (one file per generator, mirroring `numeric_range_test.go`'s
+      own style): `CharSubstitution` — single/multiple substitutable
+      positions, combinatorics on a 2-position word (`ab` with `a→{4},
+      b→{8}` → exactly `ab, a8, 4b, 48`), original-word-first, a
+      no-substitutions passthrough, multiple words, an empty word list,
+      `Reset`, and composing with `Chain`. `IllegalUnicode` — the known
+      `%c0%ae`/`%e0%80%ae`/`%f0%80%80%ae` literals for `.` (pins the
+      bit-math to a real, checkable value instead of just
+      self-consistency), multiple characters, a non-ASCII character
+      skipped (and an all-non-ASCII input producing nothing), `Reset`, and
+      composing with `Chain`. `DateRange` — a basic daily sequence, a step
+      that skips past `To` (mirroring `NumericRange`'s own step test), the
+      default-to-RFC3339-when-`Layout`-is-empty behavior, an invalid range
+      (`From` after `To`, or `Step` 0) producing nothing, `Reset`, and
+      composing with `Chain`. `go test -race ./...` passes, `pkg/payload`
+      included; `gofmt -l .` and `go vet ./...` both clean.
+      - `pkg/config`'s `GeneratorSpec` gained the matching JSON surface:
+        `Type: "char_substitution"` (reusing `Words`, plus a new
+        `Substitutions map[string][]string` — JSON object keys are always
+        strings, so a single-character string spells a `rune` key; a
+        multi-character key is rejected explicitly rather than silently
+        taking its first rune), `Type: "illegal_unicode"` (a new `Chars
+        string`, exploded to `[]rune`), and `Type: "date_range"` (new
+        `DateFrom`/`DateTo` fields, RFC 3339 strings parsed at `Build()`
+        time; `Step` reused from `numeric_range`'s own field, here meaning
+        seconds instead of an integer step; a new `Layout` field). All
+        three go through the exact same `Build()` switch and the exact
+        same optional-`Rules`-wrapping-in-a-`Chain` tail every existing
+        generator type already does — no attack-mode or `pkg/config`
+        structural changes needed, same "a Generator is a Generator"
+        property `payload.Chain`'s own doc comment already highlights.
+        `config_test.go` gained a case per new type (success, and each
+        type's own validation-error path: empty `Words`, a multi-character
+        substitution key, empty `Chars`, an unparsable `DateFrom`/`DateTo`)
+        plus a JSON `Load` round-trip for `char_substitution`.
+      **Not built yet**: `web/builder.html`'s per-marker generator editor
+      still only offers wordlist/numeric range/brute force in its type
+      dropdown — these three new types are usable today from a hand-
+      written or `cmd/cli`-driven JSON `AttackConfig` (and from
+      `pkg/config`/`pkg/payload` as a library), but adding form fields for
+      them to the browser builder (a substitution-table editor in
+      particular needs its own small UI, not just a text input) is its
+      own, purely front-end follow-up — see Next step.
+
+- [x] **Saved-config gallery rename** — `internal/configstore` gained
+      `Store.Rename(oldName, newName)`: validates both names the same way
+      Save/Load do, requires `oldName` to exist (`ErrNotFound` otherwise),
+      treats `oldName == newName` as a no-op success rather than an error,
+      and refuses to clobber an existing different config under `newName`
+      (new sentinel `ErrNameTaken`) rather than silently overwriting it —
+      Delete the target first if that's genuinely what's wanted. The
+      rename itself is a single `os.Rename`, atomic the same way `Save`'s
+      write is.
+      - `internal/server/config_store.go` — new route
+        `POST /api/configs/{name}/rename` with a `{"name": "<new>"}` JSON
+        body; `storeError` gained an `ErrNameTaken` → 409 Conflict mapping
+        (distinct from the existing 400s, since the request itself is
+        well-formed, it just conflicts with existing state).
+      - `web/builder.html` — a "Rename" button alongside each saved
+        config's existing Load/Delete, prompting for the new name and
+        refreshing the gallery list on success; if the just-renamed config
+        was the one currently loaded in the name field, that field is
+        updated to match so a follow-up Save doesn't silently resurrect
+        the old name.
+      Tests: `configstore_test.go` — round-trip rename, not-found,
+      name-taken (asserting neither saved config was touched by the
+      rejected rename), same-name no-op (including same-name-but-missing
+      still being `ErrNotFound`), and invalid old/new names.
+      `config_store_test.go` — the route live over real HTTP: success,
+      404, 409 (asserting both configs untouched), and an invalid JSON
+      body producing 400. `go test -race ./...` passes, both packages
+      included; `gofmt -l .` and `go vet ./...` clean. Also verified live:
+      ran `cmd/server` against a scratch `-configs` directory, PUT a
+      config, POSTed a rename, and confirmed `GET /api/configs` showed
+      only the new name with the original content still attached to it.
+
 ## Fixed bugs
 
 - [x] **`internal/template.Build` now recalculates `Content-Length` after
@@ -518,10 +635,10 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
         unchanged still comes out byte-for-byte what it was before the
         fix. `go test -race ./...` passes, `internal/template` included;
         `gofmt -l .` and `go vet ./...` both clean.
-      README's "Beyond logins: paths and bodies" workaround note (same-
-      length payloads / chunked encoding) is now obsolete and should be
-      trimmed or reworded next time that section is touched, since the
-      underlying bug it was working around is fixed.
+      README's "Beyond logins: paths and bodies" section has since been
+      reworded to describe this recalculation directly instead of the old
+      same-length-payloads/chunked-encoding workaround note — that stale
+      note is gone, not just trimmed.
 
 - [x] **Promote the core engine packages to a public `pkg/` API** —
       `internal/template`, `internal/payload`, `internal/attack`,
@@ -612,16 +729,25 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
 
 ## Next step
 
-1. `pkg/payload` has four generator types; Burp Intruder also has a
+1. ~~`pkg/payload` has four generator types; Burp Intruder also has a
    "Character substitution" / "Illegal Unicode" / date-range payload type
-   historically — worth a look if API-compat with Burp's own payload list
-   becomes a goal, but not clearly needed yet.
-2. Reword/trim the README's "Beyond logins: paths and bodies" workaround
-   note now that the `Content-Length` bug it described is fixed (see
-   "Fixed bugs" above).
-3. The saved-config gallery has no rename — deleting and re-saving under a
-   new name is the current workaround. Not clearly needed yet; worth
-   adding if it comes up in practice.
+   historically~~ — done; `CharSubstitution`, `IllegalUnicode`, and
+   `DateRange` (see "Done" above), wired into `pkg/config.GeneratorSpec`
+   too. `web/builder.html`'s form doesn't offer them yet — that's the one
+   piece of this still open, see below.
+2. ~~Reword/trim the README's "Beyond logins: paths and bodies" workaround
+   note~~ — done; the stale note describing the old `Content-Length`
+   bug's workaround is gone, the section now just describes the real
+   recalculation behavior.
+3. ~~The saved-config gallery has no rename~~ — done; `Store.Rename` plus
+   a `POST /api/configs/{name}/rename` route and a Rename button in
+   `builder.html`'s gallery (see "Done" above).
+4. `web/builder.html`'s per-marker generator editor only offers
+   wordlist/numeric range/brute force in its type dropdown — add
+   char_substitution/illegal_unicode/date_range form fields (the
+   substitution-table one needs its own small add-a-mapping UI, not just
+   a text input) so the three new generator types from item 1 are
+   reachable from the browser builder, not just from hand-written JSON.
 
 ## How to resume this project (e.g. if a session runs out of budget)
 

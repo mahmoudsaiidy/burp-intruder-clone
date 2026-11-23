@@ -136,6 +136,75 @@ func TestConfigStoreRoutes_SaveInvalidName400(t *testing.T) {
 	}
 }
 
+func TestConfigStoreRoutes_Rename(t *testing.T) {
+	srv, _ := newTestStoreServer(t)
+	doRequest(t, http.MethodPut, srv.URL+"/api/configs/old-name", validConfigJSON)
+
+	resp := doRequest(t, http.MethodPost, srv.URL+"/api/configs/old-name/rename", `{"name":"new-name"}`)
+	if resp.StatusCode != http.StatusNoContent {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST rename: status = %d, body = %s", resp.StatusCode, b)
+	}
+
+	// Old name is gone.
+	resp = doRequest(t, http.MethodGet, srv.URL+"/api/configs/old-name", "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET old-name after rename: status = %d, want 404", resp.StatusCode)
+	}
+
+	// New name has the same content.
+	resp = doRequest(t, http.MethodGet, srv.URL+"/api/configs/new-name", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET new-name after rename: status = %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != validConfigJSON {
+		t.Fatalf("GET new-name after rename = %s, want %s", body, validConfigJSON)
+	}
+}
+
+func TestConfigStoreRoutes_RenameMissing404(t *testing.T) {
+	srv, _ := newTestStoreServer(t)
+	resp := doRequest(t, http.MethodPost, srv.URL+"/api/configs/nope/rename", `{"name":"new-name"}`)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestConfigStoreRoutes_RenameNameTaken409(t *testing.T) {
+	srv, _ := newTestStoreServer(t)
+	const other = `{"template":"y","mode":"sniper","generators":[]}`
+	doRequest(t, http.MethodPut, srv.URL+"/api/configs/a", validConfigJSON)
+	doRequest(t, http.MethodPut, srv.URL+"/api/configs/b", other)
+
+	resp := doRequest(t, http.MethodPost, srv.URL+"/api/configs/a/rename", `{"name":"b"}`)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+
+	// Both configs are untouched.
+	resp = doRequest(t, http.MethodGet, srv.URL+"/api/configs/a", "")
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != validConfigJSON {
+		t.Fatalf("GET a after rejected rename = %s, want untouched %s", body, validConfigJSON)
+	}
+	resp = doRequest(t, http.MethodGet, srv.URL+"/api/configs/b", "")
+	body, _ = io.ReadAll(resp.Body)
+	if string(body) != other {
+		t.Fatalf("GET b after rejected rename = %s, want untouched %s", body, other)
+	}
+}
+
+func TestConfigStoreRoutes_RenameInvalidBody400(t *testing.T) {
+	srv, _ := newTestStoreServer(t)
+	doRequest(t, http.MethodPut, srv.URL+"/api/configs/cfg", validConfigJSON)
+
+	resp := doRequest(t, http.MethodPost, srv.URL+"/api/configs/cfg/rename", "not json")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 func TestConfigStoreRoutes_SaveOverwrites(t *testing.T) {
 	srv, _ := newTestStoreServer(t)
 	const updated = `{"template":"y","mode":"sniper","generators":[]}`
