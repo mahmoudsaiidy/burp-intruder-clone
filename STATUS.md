@@ -483,6 +483,38 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
       `go build ./...`, `go vet ./...`, `gofmt -l .` (clean), and
       `go test -race ./...` all pass, `internal/testtarget` included.
 
+- [x] **Saved-config gallery rename** — `internal/configstore` gained
+      `Store.Rename(oldName, newName)`: validates both names the same way
+      Save/Load do, requires `oldName` to exist (`ErrNotFound` otherwise),
+      treats `oldName == newName` as a no-op success rather than an error,
+      and refuses to clobber an existing different config under `newName`
+      (new sentinel `ErrNameTaken`) rather than silently overwriting it —
+      Delete the target first if that's genuinely what's wanted. The
+      rename itself is a single `os.Rename`, atomic the same way `Save`'s
+      write is.
+      - `internal/server/config_store.go` — new route
+        `POST /api/configs/{name}/rename` with a `{"name": "<new>"}` JSON
+        body; `storeError` gained an `ErrNameTaken` → 409 Conflict mapping
+        (distinct from the existing 400s, since the request itself is
+        well-formed, it just conflicts with existing state).
+      - `web/builder.html` — a "Rename" button alongside each saved
+        config's existing Load/Delete, prompting for the new name and
+        refreshing the gallery list on success; if the just-renamed config
+        was the one currently loaded in the name field, that field is
+        updated to match so a follow-up Save doesn't silently resurrect
+        the old name.
+      Tests: `configstore_test.go` — round-trip rename, not-found,
+      name-taken (asserting neither saved config was touched by the
+      rejected rename), same-name no-op (including same-name-but-missing
+      still being `ErrNotFound`), and invalid old/new names.
+      `config_store_test.go` — the route live over real HTTP: success,
+      404, 409 (asserting both configs untouched), and an invalid JSON
+      body producing 400. `go test -race ./...` passes, both packages
+      included; `gofmt -l .` and `go vet ./...` clean. Also verified live:
+      ran `cmd/server` against a scratch `-configs` directory, PUT a
+      config, POSTed a rename, and confirmed `GET /api/configs` showed
+      only the new name with the original content still attached to it.
+
 ## Fixed bugs
 
 - [x] **`internal/template.Build` now recalculates `Content-Length` after
@@ -518,10 +550,10 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
         unchanged still comes out byte-for-byte what it was before the
         fix. `go test -race ./...` passes, `internal/template` included;
         `gofmt -l .` and `go vet ./...` both clean.
-      README's "Beyond logins: paths and bodies" workaround note (same-
-      length payloads / chunked encoding) is now obsolete and should be
-      trimmed or reworded next time that section is touched, since the
-      underlying bug it was working around is fixed.
+      README's "Beyond logins: paths and bodies" section has since been
+      reworded to describe this recalculation directly instead of the old
+      same-length-payloads/chunked-encoding workaround note — that stale
+      note is gone, not just trimmed.
 
 - [x] **Promote the core engine packages to a public `pkg/` API** —
       `internal/template`, `internal/payload`, `internal/attack`,
@@ -616,12 +648,13 @@ machine):** `localhost` didn't resolve in this sandbox; had to use
    "Character substitution" / "Illegal Unicode" / date-range payload type
    historically — worth a look if API-compat with Burp's own payload list
    becomes a goal, but not clearly needed yet.
-2. Reword/trim the README's "Beyond logins: paths and bodies" workaround
-   note now that the `Content-Length` bug it described is fixed (see
-   "Fixed bugs" above).
-3. The saved-config gallery has no rename — deleting and re-saving under a
-   new name is the current workaround. Not clearly needed yet; worth
-   adding if it comes up in practice.
+2. ~~Reword/trim the README's "Beyond logins: paths and bodies" workaround
+   note~~ — done; the stale note describing the old `Content-Length`
+   bug's workaround is gone, the section now just describes the real
+   recalculation behavior.
+3. ~~The saved-config gallery has no rename~~ — done; `Store.Rename` plus
+   a `POST /api/configs/{name}/rename` route and a Rename button in
+   `builder.html`'s gallery (see "Done" above).
 
 ## How to resume this project (e.g. if a session runs out of budget)
 

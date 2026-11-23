@@ -787,6 +787,7 @@ Connection: close
           savedConfigsListEl.appendChild(el('div', { class: 'inline', style: 'margin-bottom: 0.4rem;' },
             el('span', { style: 'flex: 1; overflow-wrap: anywhere; color: var(--text);' }, name),
             el('button', { type: 'button', class: 'secondary small', onclick: () => loadSavedConfig(name) }, 'Load'),
+            el('button', { type: 'button', class: 'secondary small', onclick: () => renameSavedConfig(name) }, 'Rename'),
             el('button', { type: 'button', class: 'secondary small', onclick: () => deleteSavedConfig(name) }, 'Delete')));
         });
       } catch (err) {
@@ -829,6 +830,26 @@ Connection: close
         statusEl.textContent = `loaded "${name}". Review and Run when ready.`;
       } catch (err) {
         statusEl.textContent = `couldn't load "${name}": ${err.message}`;
+      }
+    }
+
+    async function renameSavedConfig(name) {
+      const newName = prompt(`Rename "${name}" to:`, name);
+      if (newName === null) return; // cancelled
+      const trimmed = newName.trim();
+      if (!trimmed || trimmed === name) return;
+      try {
+        const resp = await fetch(`/api/configs/${encodeURIComponent(name)}/rename`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: trimmed }),
+        });
+        if (!resp.ok) throw new Error((await resp.text()).trim() || `HTTP ${resp.status}`);
+        if (savedConfigNameEl.value === name) savedConfigNameEl.value = trimmed;
+        statusEl.textContent = `renamed "${name}" to "${trimmed}".`;
+        refreshSavedConfigs();
+      } catch (err) {
+        statusEl.textContent = `couldn't rename "${name}": ${err.message}`;
       }
     }
 
